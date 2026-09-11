@@ -68,7 +68,7 @@ test('three death-save failures become a playable setback rather than deletion',
 
 test('condition changes are whitelisted, deduplicated and removable',()=>{
   const s=W.initial('R','fighter');const u=W.apply(s,result(s,{conditionsAdded:['poisoned','POISONED','made-up','prone']}),'I drink swamp water.',{kind:'none',blocked:false,healing:0,damage:0});
-  assert.deepEqual(u.conditions.sort(),['poisoned','prone']);const v=W.apply(u,result(u,{conditionsRemoved:['poisoned']}),'I recover.',{kind:'none',blocked:false,healing:0,damage:0});assert.deepEqual(v.conditions,['prone']);
+  assert.deepEqual([...u.conditions].sort(),['poisoned','prone']);const v=W.apply(u,result(u,{conditionsRemoved:['poisoned']}),'I recover.',{kind:'none',blocked:false,healing:0,damage:0});assert.deepEqual(v.conditions,['prone']);
 });
 
 test('map, factions, facts and journal lists remain bounded',()=>{
