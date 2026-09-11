@@ -18,8 +18,18 @@ const BACKGROUNDS={
 };
 const TONES={balanced:'Balanced adventure',heroic:'Heroic fantasy',mystery:'Dark mystery',whimsical:'Whimsical fantasy'};
 
+const MAX_LEVEL=5;
+const XP_FOR_LEVEL={2:0,3:75,4:150,5:250};
+const HP_PER_LEVEL={fighter:8,rogue:6,wizard:5};
+const UNLOCKS={
+  fighter:{3:['Improved Critical: attacks now crit on 19 or 20.']},
+  rogue:{3:['Sneak Attack increased to 2d6.'],5:['Sneak Attack increased to 3d6.']},
+  wizard:{5:['Fire Bolt increased to 2d10.']}
+};
+
 const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
 const die=(sides,roll=randomInt)=>roll(1,sides+1);
+function diceTotal(count,sides,roll=randomInt){let total=0;for(let i=0;i<count;i++)total+=die(sides,roll);return total}
 function normaliseChoice(value,table,fallback){return typeof value==='string'&&Object.hasOwn(table,value)?value:fallback}
 function normaliseConditions(value){
   if(!Array.isArray(value))return [];
@@ -33,17 +43,32 @@ function mergeAdvantage(base,state,kind){
   if(c.has('invisible')&&kind==='attack')plus=true;
   if(plus&&minus)return 'normal';return plus?'advantage':minus?'disadvantage':'normal';
 }
+function characterLevel(state){const level=Number(state?.level);return Number.isInteger(level)?clamp(level,1,MAX_LEVEL):2}
+function xpForLevel(level){return Object.hasOwn(XP_FOR_LEVEL,level)?XP_FOR_LEVEL[level]:0}
+function levelForXp(xp){let level=2;for(let next=3;next<=MAX_LEVEL;next++)if(Number(xp)>=xpForLevel(next))level=next;return level}
+function xpToNextLevel(state){const level=characterLevel(state);return level>=MAX_LEVEL?null:Math.max(0,xpForLevel(level+1)-(Number(state?.xp)||0))}
+function proficiencyBonus(level){return level>=5?3:2}
+function wizardSlots(level){return Math.min(6,characterLevel({level})+1)}
+function criticalThreshold(state){return state?.cls==='fighter'&&characterLevel(state)>=3?19:20}
+function sneakDice(level){return characterLevel({level})>=5?3:characterLevel({level})>=3?2:1}
+function fireBoltDice(level){return characterLevel({level})>=5?2:1}
+function hpPerLevel(cls){return Object.hasOwn(HP_PER_LEVEL,cls)?HP_PER_LEVEL[cls]:5}
+function unlocksAt(cls,level){const byClass=UNLOCKS[cls]||{},gained=[...(byClass[level]||[])];if(level===5)gained.push('Proficiency bonus increased to +3.');return gained}
+function progressionFor(cls,fromLevel,toLevel){
+  let hpGain=0;const unlocks=[];
+  for(let level=fromLevel+1;level<=toLevel;level++){hpGain+=hpPerLevel(cls);unlocks.push(...unlocksAt(cls,level))}
+  return {from:fromLevel,to:toLevel,hpGain,unlocks};
+}
 function attackDamage(state,resolution,roll=randomInt,action=''){
   const r=resolution?.roll;if(resolution?.kind!=='attack'||!r?.success)return {amount:0,text:''};
-  const crit=!!r.critical;let amount=0,label='';
+  const crit=!!r.critical,level=characterLevel(state);let amount=0,label='';
   if(state.cls==='fighter'){
     const first=die(8,roll),extra=crit?die(8,roll):0;amount=first+extra+3;label=`Longsword ${first}${crit?` + ${extra} critical die`:''} + 3`;
   }else if(state.cls==='rogue'){
-    const first=die(6,roll),extra=crit?die(6,roll):0;let sneak=0,sneakCrit=0;
-    if(r.advantage==='advantage'||/\b(sneak|hidden|from hiding)\b/i.test(action)){sneak=die(6,roll);if(crit)sneakCrit=die(6,roll)}
+    const first=die(6,roll),extra=crit?die(6,roll):0,hasSneak=r.advantage==='advantage'||/\b(sneak|hidden|from hiding)\b/i.test(action),sneak=hasSneak?diceTotal(sneakDice(level),6,roll):0,sneakCrit=crit&&hasSneak?diceTotal(sneakDice(level),6,roll):0;
     amount=first+extra+3+sneak+sneakCrit;label=`Weapon ${first}${crit?` + ${extra} critical die`:''} + 3${sneak?` + sneak ${sneak}${sneakCrit?` + ${sneakCrit}`:''}`:''}`;
   }else{
-    const first=die(10,roll),extra=crit?die(10,roll):0;amount=first+extra;label=`Fire Bolt ${first}${crit?` + ${extra} critical die`:''}`;
+    const first=diceTotal(fireBoltDice(level),10,roll),extra=crit?diceTotal(fireBoltDice(level),10,roll):0;amount=first+extra;label=`Fire Bolt ${first}${crit?` + ${extra} critical dice`:''}`;
   }
   return {amount:clamp(amount,0,50),text:label};
 }
@@ -65,4 +90,4 @@ function rollDeathSave(state,roll=randomInt){
 function applyConditionChanges(current,added,removed){
   const set=new Set(normaliseConditions(current));for(const c of normaliseConditions(removed))set.delete(c);for(const c of normaliseConditions(added))set.add(c);return [...set].slice(0,6);
 }
-module.exports={CONDITIONS,ORIGINS,BACKGROUNDS,TONES,normaliseChoice,normaliseConditions,backgroundProficient,mergeAdvantage,attackDamage,automaticSpellDamage,freshDeathSaves,rollDeathSave,applyConditionChanges};
+module.exports={MAX_LEVEL,characterLevel,xpForLevel,levelForXp,xpToNextLevel,proficiencyBonus,wizardSlots,criticalThreshold,sneakDice,fireBoltDice,progressionFor,CONDITIONS,ORIGINS,BACKGROUNDS,TONES,normaliseChoice,normaliseConditions,backgroundProficient,mergeAdvantage,attackDamage,automaticSpellDamage,freshDeathSaves,rollDeathSave,applyConditionChanges};
