@@ -1,0 +1,14 @@
+#mobile-quick-stats{display:none}
+@media (max-width:760px){
+  .window-workspace{display:flex;flex-direction:column;min-height:0;padding:0}
+  .window-panel{position:relative!important;left:auto!important;top:auto!important;width:auto!important;height:auto!important;max-height:none;margin:0 0 18px;overflow:visible}
+  .window-panel[data-window-id="story"]{order:-3}
+  .window-panel[data-window-id="map"]{order:-2}
+  .window-panel[data-window-id="character-sheet"]{order:-1}
+  .window-panel.is-minimized,.window-panel.is-closed{display:block}
+  .window-panel.is-minimized>*:not(.window-titlebar):not(.window-resize){display:block}
+  .window-resize{display:none}
+  .window-titlebar{cursor:default}
+  #mobile-quick-stats{display:block;padding:8px 12px;background:#101713;border-bottom:1px solid var(--line);color:var(--gold);font:11px/1.4 system-ui,sans-serif;letter-spacing:.04em}
+  #window-launcher{display:none}
+}
