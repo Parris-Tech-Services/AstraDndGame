@@ -721,6 +721,59 @@ Depends on the full-transcript storage in 2.3 and is a lovely end-of-campaign mo
 
 ---
 
+## Product direction
+
+The strongest version of Astra is not simply “ChatGPT plays D&D.” It is a persistent solo fantasy campaign where the AI improvises the fiction, while the game engine owns consequences.
+
+The player should be free to attempt any plausible action, but the server must remain authoritative for:
+
+- whether an attack hits,
+- how much damage is dealt or received,
+- whether a spell slot, potion, or class resource exists,
+- whether a quest, faction, or NPC relationship changes,
+- whether an item or reward is earned,
+- and what is lost when a dangerous choice fails.
+
+This division is the product's core identity: expressive AI narration on top of rules that players can trust.
+
+### Player-facing priorities
+
+The next releases should make the game feel more like a campaign and less like a sequence of model responses:
+
+1. Give every meaningful enemy a real encounter state: target, HP, AC, round, intent, attacks, and a visible defeat condition.
+2. Make character progression real with levels, class features, spell growth, equipment choices, and meaningful XP thresholds.
+3. Make the world legible with a persistent visual map, structured quests, structured NPCs, faction standing, and a codex.
+4. Make turns feel immediate with streamed narration, staged progress feedback, local command fast paths, and safe retry behavior.
+5. Make campaigns durable with export/import, multiple slots, migration-safe saves, rewind, and eventually cross-device accounts.
+6. Make the interface welcoming on mobile and accessible to keyboard, screen-reader, reduced-motion, and read-aloud players.
+
+### Release gates for a premium indie demo
+
+A public demo is ready when a new player can:
+
+- create a distinct hero in under two minutes,
+- understand what to try without reading a rules manual,
+- reach a real choice or tactical risk in the first three turns,
+- see the result of a roll and understand its consequence,
+- complete at least one encounter with a persistent enemy state,
+- discover a location, NPC, quest, or faction that remains in the campaign,
+- recover from a provider failure without losing progress,
+- export the campaign and restore it in another browser,
+- use the core loop on a narrow mobile viewport,
+- and finish with a memorable scene or an unresolved reason to return.
+
+### System design principles
+
+- The model proposes fiction; the server validates state transitions.
+- No important resource should be spent twice because of narration or retries.
+- Every stored state field needs a rule, a renderer, or a migration test.
+- Every player-facing promise in the UI must correspond to implemented mechanics.
+- Preserve the player's agency: suggestions are invitations, not a fixed menu.
+- Prefer visible consequences over hidden difficulty.
+- Preserve the full chronicle for the player even when provider context is compressed.
+- Keep the classic adventure available as a deterministic, no-provider fallback.
+- Treat prompt changes as gameplay changes and evaluate them with golden transcripts.
+
 ## Suggested order of work
 
 Sequenced by value per unit of effort, not by section order.
@@ -756,7 +809,7 @@ Sequenced by value per unit of effort, not by section order.
 
 ---
 
-*Reviewed against `c2eba07`. Every **[BUG]** in this document was confirmed by reading the
+*Reviewed against `f28e098a55d52362ce4a8a24526841b9d3006dd9`. Every **[BUG]** in this document was confirmed by reading the
 source, not inferred — but none has been fixed here, and the suggested fixes are untested
 proposals rather than verified patches. The **[IDEA]** items are judgement calls and
 should be argued with.*
