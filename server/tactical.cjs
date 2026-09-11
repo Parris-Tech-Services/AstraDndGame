@@ -9,9 +9,9 @@ const die=(sides,roll=randomInt)=>roll(1,sides+1);
 const distanceFt=(a,b)=>Math.max(Math.abs(a.x-b.x),Math.abs(a.y-b.y))*5;
 const occupied=(combat,x,y,except)=>Object.values(combat.actors||{}).some(actor=>actor.id!==except&&actor.hp>0&&actor.x===x&&actor.y===y);
 const ENEMY_STYLES=[
-  {id:'bruiser',label:'Bruiser',hp:20,hpPerLevel:5,ac:14,attack:5,damageSides:8,damageBonus:2,range:5,speed:25,ranged:false},
-  {id:'skirmisher',label:'Skirmisher',hp:16,hpPerLevel:4,ac:15,attack:5,damageSides:6,damageBonus:2,range:5,speed:35,ranged:false},
-  {id:'archer',label:'Archer',hp:14,hpPerLevel:4,ac:13,attack:5,damageSides:8,damageBonus:1,range:60,speed:30,ranged:true}
+  {id:'bruiser',label:'Bruiser',hp:24,hpPerLevel:6,ac:15,attack:6,damageSides:10,damageBonus:3,range:5,speed:25,ranged:false},
+  {id:'skirmisher',label:'Skirmisher',hp:20,hpPerLevel:5,ac:16,attack:6,damageSides:8,damageBonus:3,range:5,speed:35,ranged:false},
+  {id:'archer',label:'Archer',hp:18,hpPerLevel:5,ac:14,attack:6,damageSides:8,damageBonus:3,range:60,speed:30,ranged:true}
 ];
 function deriveExploration(state){return spatial.deriveExploration(state)}
 function blankCombat(){return {active:false,round:0,turn:'hero',actors:{},grid:null,log:[],reachable:[]}}
@@ -40,13 +40,13 @@ function makeGrid(state){
 function hashText(value){let hash=2166136261;for(const char of String(value||'')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619)}return hash>>>0}
 function enemyProfile(state,enemyName){
   const level=rules.characterLevel(state),style=ENEMY_STYLES[hashText(`${state.location}|${enemyName}`)%ENEMY_STYLES.length],scale=Math.max(0,level-2);
-  return {...style,hp:style.hp+style.hpPerLevel*scale,ac:Math.min(17,style.ac+Math.floor(scale/2)),attack:style.attack+Math.floor(scale/2),damageBonus:style.damageBonus+Math.floor(scale/2),level};
+  return {...style,hp:style.hp+style.hpPerLevel*scale,ac:Math.min(18,style.ac+Math.floor(scale/2)),attack:style.attack+Math.floor(scale/2),damageBonus:style.damageBonus+Math.floor(scale/2),level};
 }
 function startEncounter(state,enemyName='Hostile creature'){
   let next=enrichSpatial(state);if(next.combat.active)return next;
   const enemy=text(enemyName,60)||'Hostile creature',grid=makeGrid(next),profile=enemyProfile(next,enemy),heroSpeed=next.conditions?.includes('exhausted')?25:30;
   const hero={id:'hero',name:text(next.name,40)||'Hero',faction:'party',x:2,y:4,hp:clamp(Number(next.hp)||1,0,999),maxHp:clamp(Number(next.maxHp)||1,1,999),ac:clamp(Number(next.ac)||10,1,30),speed:heroSpeed,movementSpentFt:0,actionUsed:false,bonusActionUsed:false,reactionAvailable:true,disengaged:false,dashed:false,hidden:false};
-  const foe={id:'enemy-1',name:enemy,faction:'enemy',x:9,y:4,hp:profile.hp,maxHp:profile.hp,ac:profile.ac,speed:profile.speed,movementSpentFt:0,actionUsed:false,bonusActionUsed:false,reactionAvailable:true,disengaged:false,dashed:false,style:profile.id,styleLabel:profile.label,attackBonus:profile.attack,damageSides:profile.damageSides,damageBonus:profile.damageBonus,range:profile.range,ranged:profile.ranged};
+  const foe={id:'enemy-1',name:enemy,faction:'enemy',x:9,y:4,hp:profile.hp,maxHp:profile.hp,ac:profile.ac,speed:profile.speed,reactionAvailable:true,style:profile.id,styleLabel:profile.label,attackBonus:profile.attack,damageSides:profile.damageSides,damageBonus:profile.damageBonus,range:profile.range,ranged:profile.ranged};
   next.combat={active:true,round:1,turn:'hero',actors:{hero,[foe.id]:foe},grid,log:[`Tactical encounter began: ${enemy} (${profile.label.toLowerCase()}).`],reachable:[]};
   return enrichSpatial(next);
 }
@@ -134,7 +134,7 @@ function endTurn(state,roll=randomInt){
   const hero=combat.actors.hero,enemy=combat.actors['enemy-1'];combat.turn='enemy';let summary='';
   if(enemy&&enemy.hp>0){const canAttack=enemy.ranged?distanceFt(enemy,hero)<=enemy.range&&coverBetween(combat,enemy,hero)!=='total':distanceFt(enemy,hero)<=5;if(!canAttack){stepToward(combat,enemy,hero);summary=`${enemy.name} repositions. `}summary+=enemyAttack(next,roll)}
   if(next.hp<=0){downHero(next);summary+=' You fall unconscious.';return refreshReachable(next,{ok:true,summary})}
-  combat.round=(combat.round||1)+1;combat.turn='hero';hero.actionUsed=false;hero.bonusActionUsed=false;hero.movementSpentFt=0;hero.reactionAvailable=true;hero.disengaged=false;hero.dashed=false;hero.hidden=false;if(enemy){enemy.actionUsed=false;enemy.movementSpentFt=0;enemy.reactionAvailable=true}
+  combat.round=(combat.round||1)+1;combat.turn='hero';hero.actionUsed=false;hero.bonusActionUsed=false;hero.movementSpentFt=0;hero.reactionAvailable=true;hero.disengaged=false;hero.dashed=false;hero.hidden=false;if(enemy)enemy.reactionAvailable=true;
   combat.log=[...(combat.log||[]),summary||'The enemy hesitates.'].slice(-30);return refreshReachable(next,{ok:true,summary:summary||'The enemy hesitates.'});
 }
 function downHero(state){const combat=state.combat;combat.active=false;combat.turn='complete';syncHeroProjection(state);if(!Array.isArray(state.conditions))state.conditions=[];if(!state.conditions.includes('unconscious'))state.conditions.push('unconscious');state.journalEvents=[...(Array.isArray(state.journalEvents)?state.journalEvents:[]),'Fell unconscious during a tactical encounter.'].slice(-18)}
