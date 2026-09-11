@@ -1,6 +1,7 @@
 'use strict';
-let cooldownUntil=0;
-const disabled=new Set();
+const DISABLED_TTL_MS=5*60*1000;
+function createProviderState(){return {cooldownUntil:0,disabledUntil:new Map()}}
+const defaultProviderState=createProviderState();
 
 class ProviderError extends Error{
   constructor(message,status=503,retryAfter=0,details={}){
@@ -14,6 +15,7 @@ class ProviderError extends Error{
     this.providerMessage=details.providerMessage||'';
     this.model=details.model||'';
     this.stage=details.stage||'';
+    this.causeCode=details.causeCode||'';
   }
 }
 
@@ -23,7 +25,7 @@ function keys(env=process.env){
   catch{result=(env.GROQ_API_KEYS||'').split(/[\s,]+/)}
   if(!Array.isArray(result))result=[];
   if(env.GROQ_API_KEY)result.unshift(env.GROQ_API_KEY);
-  return [...new Set(result.filter(k=>typeof k==='string'&&k.startsWith('gsk_')))];
+  return [...new Set(result.filter(key=>typeof key==='string'&&key.startsWith('gsk_')))];
 }
 
 function retrySeconds(value,now){
@@ -37,11 +39,15 @@ function clean(value,max=320){
   return typeof value==='string'?value.replace(/[\u0000-\u001f\u007f]+/g,' ').replace(/\s+/g,' ').trim().slice(0,max):'';
 }
 
+function pruneDisabled(state,now){
+  for(const [key,until] of state.disabledUntil)if(until<=now)state.disabledUntil.delete(key);
+}
+
 async function providerDetails(response,model,stage){
-  let payload=null;
-  try{if(typeof response.json==='function')payload=await response.json()}catch{}
+  let payload=null,causeCode='provider_error';
+  try{if(typeof response.json==='function')payload=await response.json()}catch{causeCode='unreadable_error_body'}
   if(payload===null&&typeof response.text==='function'){
-    try{const raw=await response.text();if(raw)payload={error:{message:raw}}}catch{}
+    try{const raw=await response.text();if(raw)payload={error:{message:raw}}}catch{causeCode='unreadable_error_body'}
   }
   const error=payload&&typeof payload==='object'?(payload.error&&typeof payload.error==='object'?payload.error:payload):{};
   return {
@@ -50,7 +56,8 @@ async function providerDetails(response,model,stage){
     providerType:clean(error.type,120),
     providerMessage:clean(error.message,320),
     model,
-    stage
+    stage,
+    causeCode
   };
 }
 
@@ -60,14 +67,13 @@ function structuredOutputFailure(details){
 }
 
 function publicFailure(details){
-  const suffix=details.providerCode?` (${details.providerStatus}: ${details.providerCode})`:` (${details.providerStatus||'network'})`;
-  if(details.providerCode==='invalid_model_output')return new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,details);
-  if(details.providerStatus===401)return new ProviderError('The dungeon master\'s Groq credential was rejected. Your save is unchanged.',503,0,details);
-  if(details.providerStatus===403)return new ProviderError(`The Groq project does not permit an available dungeon-master model${suffix}. Your save is unchanged.`,502,0,details);
-  if([400,404,413,422].includes(details.providerStatus))return new ProviderError(`Groq rejected the dungeon-master request${suffix}. Your save is unchanged.`,502,0,details);
-  if(details.providerStatus>=500)return new ProviderError('Groq is temporarily unavailable. Your progress is safe.',503,0,details);
+  if(['invalid_model_output','output_truncated','empty_model_output','invalid_json_output'].includes(details.providerCode))return new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,details);
+  if(details.providerStatus===401)return new ProviderError('The dungeon master credential was rejected. Your save is unchanged.',503,0,details);
+  if(details.providerStatus===403)return new ProviderError('The configured Groq project does not permit an available dungeon-master model. Your save is unchanged.',502,0,details);
+  if([400,404,413,422].includes(details.providerStatus))return new ProviderError('Groq rejected the dungeon-master request. Your save is unchanged.',502,0,details);
+  if(details.providerStatus>=500||details.providerStatus===498)return new ProviderError('Groq is temporarily unavailable. Your progress is safe.',503,0,details);
   if(details.providerStatus===0)return new ProviderError('The dungeon master lost connection to Groq. Please try the same action again.',503,0,details);
-  return new ProviderError(`Groq could not complete the dungeon-master request${suffix}. Your save is unchanged.`,502,0,details);
+  return new ProviderError('Groq could not complete the dungeon-master request. Your save is unchanged.',502,0,details);
 }
 
 function requestBody(model,messages,schema,strict=true,stage='turn'){
@@ -85,65 +91,67 @@ function requestBody(model,messages,schema,strict=true,stage='turn'){
 
 async function request(key,model,messages,schema,{fetcher,now,deadline,stage,strict=true}){
   const remaining=deadline-now();
-  if(remaining<1000)throw new ProviderError('The dungeon master is taking too long. Your progress is safe.',503,0,{model,stage});
+  if(remaining<1000)return {response:null,failure:{providerStatus:0,providerCode:'deadline_exhausted',causeCode:'deadline',model,stage}};
   try{
-    return await fetcher('https://api.groq.com/openai/v1/chat/completions',{
+    const response=await fetcher('https://api.groq.com/openai/v1/chat/completions',{
       method:'POST',
       signal:AbortSignal.timeout(Math.min(16000,remaining)),
       headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
       body:JSON.stringify(requestBody(model,messages,schema,strict,stage))
     });
-  }catch{
-    return null;
+    return {response,failure:null};
+  }catch(error){
+    const timeout=error?.name==='TimeoutError'||error?.name==='AbortError';
+    return {response:null,failure:{providerStatus:0,providerCode:timeout?'network_timeout':'network_error',causeCode:timeout?'timeout':'network',model,stage}};
   }
 }
 
 async function parseSuccess(response,model,stage){
-  try{
-    const data=await response.json();
-    if(data.choices?.[0]?.finish_reason==='length')throw new Error('length');
-    const content=data.choices?.[0]?.message?.content;
-    if(typeof content!=='string'||!content.trim())throw new Error('empty');
-    return JSON.parse(content);
-  }catch{
-    throw new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,{providerStatus:response.status||200,providerCode:'invalid_model_output',model,stage});
-  }
+  let data;
+  try{data=await response.json()}catch{throw new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,{providerStatus:response.status||200,providerCode:'invalid_json_output',causeCode:'invalid_response_json',model,stage})}
+  if(data.choices?.[0]?.finish_reason==='length')throw new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,{providerStatus:response.status||200,providerCode:'output_truncated',causeCode:'token_limit',model,stage});
+  const content=data.choices?.[0]?.message?.content;
+  if(typeof content!=='string'||!content.trim())throw new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,{providerStatus:response.status||200,providerCode:'empty_model_output',causeCode:'empty_output',model,stage});
+  try{return JSON.parse(content)}catch{throw new ProviderError('The dungeon master returned an incomplete turn. Nothing has been changed.',502,0,{providerStatus:response.status||200,providerCode:'invalid_json_output',causeCode:'model_json_parse',model,stage})}
 }
 
 async function parseOrRemember(response,model,stage){
   try{return {value:await parseSuccess(response,model,stage),failure:null}}
-  catch(error){return {value:null,failure:{providerStatus:error.providerStatus||response.status||200,providerCode:error.providerCode||'invalid_model_output',providerType:error.providerType||'',providerMessage:error.providerMessage||'',model,stage}}}
+  catch(error){return {value:null,failure:{providerStatus:error.providerStatus||response.status||200,providerCode:error.providerCode||'invalid_model_output',providerType:error.providerType||'',providerMessage:error.providerMessage||'',causeCode:error.causeCode||'invalid_output',model,stage}}}
 }
 
-async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.now,stage='turn'}={}){
+function recordRateLimit(state,response,model,stage,now){
+  const seconds=retrySeconds(response.headers?.get?.('retry-after'),now());
+  // Groq rate limits have an organisation ceiling, so changing credentials does not bypass a 429.
+  state.cooldownUntil=now()+seconds*1000;
+  throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,seconds,{providerStatus:429,providerCode:'rate_limit',causeCode:'rate_limit',model,stage});
+}
+
+async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.now,stage='turn',providerState=defaultProviderState}={}){
   const pool=keys(env);
   if(!pool.length)throw new ProviderError('The dungeon master is not configured yet.',503);
-  if(cooldownUntil>now())throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,Math.max(1,Math.ceil((cooldownUntil-now())/1000)),{providerStatus:429,stage});
+  const current=now();pruneDisabled(providerState,current);
+  if(providerState.cooldownUntil>current)throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,Math.max(1,Math.ceil((providerState.cooldownUntil-current)/1000)),{providerStatus:429,providerCode:'rate_limit',causeCode:'rate_limit',stage});
 
   const models=[...new Set([env.GROQ_MODEL||'openai/gpt-oss-120b',env.GROQ_FALLBACK_MODEL||'openai/gpt-oss-20b'].filter(Boolean))];
   const deadline=now()+35000;
   let lastFailure=null;
 
-  // Credentials are ordered primary -> backup. They are not rotated for throughput.
+  // Credentials are tried in configured order for availability failover. A provider 429 is
+  // organisation-scoped and is respected rather than bypassed by hopping credentials.
   for(const key of pool){
-    if(disabled.has(key))continue;
+    if((providerState.disabledUntil.get(key)||0)>now())continue;
     let tryNextCredential=false;
+    let stopAfterCredential=false;
 
     for(const model of models){
-      let response=await request(key,model,messages,schema,{fetcher,now,deadline,stage,strict:true});
-      if(response===null){
-        lastFailure={providerStatus:0,providerCode:'network_error',providerMessage:'Network request failed or timed out.',model,stage};
-        continue;
-      }
+      const attempt=await request(key,model,messages,schema,{fetcher,now,deadline,stage,strict:true});
+      if(!attempt.response){lastFailure=attempt.failure;tryNextCredential=true;continue}
+      let response=attempt.response;
 
-      if(response.status===429){
-        const seconds=retrySeconds(response.headers?.get?.('retry-after'),now());
-        cooldownUntil=now()+seconds*1000;
-        throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,seconds,{providerStatus:429,providerCode:'rate_limit',model,stage});
-      }
-
+      if(response.status===429)recordRateLimit(providerState,response,model,stage,now);
       if(response.status===401){
-        disabled.add(key);
+        providerState.disabledUntil.set(key,now()+DISABLED_TTL_MS);
         lastFailure=await providerDetails(response,model,stage);
         tryNextCredential=true;
         break;
@@ -161,48 +169,36 @@ async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.
       // Retry structured-output request errors once using JSON Object mode. The world layer
       // still validates every field before a save can change.
       if(structuredOutputFailure(details)){
-        const compatibility=await request(key,model,messages,schema,{fetcher,now,deadline,stage,strict:false});
-        if(compatibility===null){
-          lastFailure={providerStatus:0,providerCode:'network_error',providerMessage:'Compatibility retry failed or timed out.',model,stage};
-          continue;
-        }
-        if(compatibility.status===429){
-          const seconds=retrySeconds(compatibility.headers?.get?.('retry-after'),now());
-          cooldownUntil=now()+seconds*1000;
-          throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,seconds,{providerStatus:429,providerCode:'rate_limit',model,stage});
-        }
-        if(compatibility.status===401){
-          disabled.add(key);
-          lastFailure=await providerDetails(compatibility,model,stage);
+        const compatibilityAttempt=await request(key,model,messages,schema,{fetcher,now,deadline,stage,strict:false});
+        if(!compatibilityAttempt.response){lastFailure=compatibilityAttempt.failure;tryNextCredential=true;continue}
+        response=compatibilityAttempt.response;
+        if(response.status===429)recordRateLimit(providerState,response,model,stage,now);
+        if(response.status===401){
+          providerState.disabledUntil.set(key,now()+DISABLED_TTL_MS);
+          lastFailure=await providerDetails(response,model,stage);
           tryNextCredential=true;
           break;
         }
-        if(compatibility.ok){
-          const parsed=await parseOrRemember(compatibility,model,stage);
+        if(response.ok){
+          const parsed=await parseOrRemember(response,model,stage);
           if(parsed.failure){lastFailure=parsed.failure;continue}
           return parsed.value;
         }
-        details=await providerDetails(compatibility,model,stage);
+        details=await providerDetails(response,model,stage);
         lastFailure=details;
       }
 
-      if(details.providerStatus===403){
-        // Try the fallback model first; if no model is permitted, a backup credential may
-        // belong to a differently configured project. This is availability failover only.
-        tryNextCredential=true;
-        continue;
-      }
-      if(details.providerStatus>=500)continue;
-      if([400,404,413,422].includes(details.providerStatus))continue;
+      if(details.providerStatus===403||details.providerStatus>=500||details.providerStatus===498){tryNextCredential=true;continue}
+      if([400,404,413,422].includes(details.providerStatus)){stopAfterCredential=true;continue}
       throw publicFailure(details);
     }
 
-    if(!tryNextCredential&&lastFailure&&![403,500,501,502,503,504].includes(lastFailure.providerStatus))break;
+    if(stopAfterCredential&&!tryNextCredential)break;
   }
 
   if(lastFailure)throw publicFailure(lastFailure);
   throw new ProviderError('No valid dungeon-master credential is available. Your save is unchanged.',503);
 }
 
-function resetForTests(){cooldownUntil=0;disabled.clear()}
-module.exports={generate,keys,ProviderError,resetForTests};
+function resetForTests(){defaultProviderState.cooldownUntil=0;defaultProviderState.disabledUntil.clear()}
+module.exports={generate,keys,ProviderError,createProviderState,resetForTests};
