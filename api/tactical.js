@@ -11,10 +11,10 @@ module.exports=async function handler(req,res){
   const secret=getSecret();
   if(req.method==='GET')return reply(res,200,{configured:!!secret,mode:'tactical',features:['exploration-map','battle-grid','movement','dash','disengage','opportunity-attacks','range','line-of-sight','cover','turn-economy'],build:(env.VERCEL_GIT_COMMIT_SHA||'local').slice(0,12)});
   if(req.method!=='POST'){res.setHeader('Allow','GET, POST');return reply(res,405,{error:'Method not allowed.'})}
-  const origin=req.headers.origin;if(!require('../server/security.cjs').checkOrigin(req))return reply(res,403,{error:'Please play from the game website.'});
+  if(!require('../server/security.cjs').checkOrigin(req))return reply(res,403,{error:'Please play from the game website.'});
   if(!secret)return reply(res,503,{error:'Tactical mode is waiting for the campaign signing secret.'});
   let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;if(!body||JSON.stringify(body).length>100000)throw new Error()}catch{return reply(res,400,{error:'Invalid request.'})}
-  if(require('../server/ratelimit.cjs').isRateLimited(req,60,60000)){console.warn('[astra-dnd telemetry]',JSON.stringify({route:'/api/tactical',status:429,error:'rate_limit_local'}));res.setHeader('Retry-After','60');return reply(res,429,{error:'Too many tactical actions at once. Please wait a minute.'})}
+  if(require('../server/ratelimit.cjs').isRateLimited(req, { bucket: 'tactical', maxRequests: 60, windowMs: 60000 })){console.warn('[astra-dnd telemetry]',JSON.stringify({route:'/api/tactical',status:429,error:'rate_limit_local'}));res.setHeader('Retry-After','60');return reply(res,429,{error:'Too many tactical actions at once. Please wait a minute.'})}
   let state;try{state=world.verify(body.save,secret)}catch{return reply(res,400,{error:'This campaign save could not be verified.'})}
   const op=typeof body.op==='string'?body.op:'';let result;
   const startTime = Date.now();

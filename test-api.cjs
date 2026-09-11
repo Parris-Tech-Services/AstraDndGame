@@ -20,7 +20,14 @@ const narration=state=>({narrative:'The woman studies you, then answers with gua
   // Explicit origin tests
   r=await call('POST',{start:true,name:'R',cls:'fighter'},{origin:'https://game.test'});assert.equal(r.statusCode,200,'Same-origin should be allowed');
   r=await call('POST',{start:true,name:'R',cls:'fighter'},{});assert.equal(r.statusCode,200,'Missing origin (server/curl) should be allowed');
-  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'preview-app.vercel.app', origin:'https://preview-app.vercel.app'});assert.equal(r.statusCode,200,'Preview deployment origin matching host should be allowed');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'preview.app', origin:'https://preview.app'});assert.equal(r.statusCode,200,'Preview deployment origin matching host should be allowed');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'http://game.test'});assert.equal(r.statusCode,200,'Same hostname with different scheme allowed');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'https://game.test:8080'});assert.equal(r.statusCode,403,'Malicious port mismatch rejected');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'https://game.test.evil.example'});assert.equal(r.statusCode,403,'Deceptive suffix rejected');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'https://evil.game.test.example'});assert.equal(r.statusCode,403,'Deceptive suffix rejected');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'https://game.test@evil.example'});assert.equal(r.statusCode,403,'Deceptive prefix rejected');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'https://GAME.test'});assert.equal(r.statusCode,200,'Uppercase hostname canonicalizes and passes');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'not-a-url'});assert.equal(r.statusCode,403,'Malformed origin rejected');
   r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'null'});assert.equal(r.statusCode,403,'Opaque origin (null) should be rejected');
   r=await call('POST',{start:true,name:'R',cls:'bard'});assert.equal(r.statusCode,400);
   for(const cls of ['fighter','rogue','wizard']){r=await call('POST',{start:true,name:'  Tester  ',cls});assert.equal(r.statusCode,200);assert.equal(r.body.state.cls,cls);assert.equal(r.body.state.name,'Tester');assert.equal(typeof r.body.save,'string');if(cls==='fighter')assert.equal(r.body.state.secondWindReady,true)}

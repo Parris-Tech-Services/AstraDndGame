@@ -17,12 +17,15 @@ function getClientIp(req) {
 /**
  * Check if the client has exceeded the rate limit.
  * @param {Object} req - The incoming request
- * @param {number} maxRequests - Maximum requests allowed per window
- * @param {number} windowMs - Window duration in milliseconds
+ * @param {Object} options - Configuration for the rate limit
+ * @param {string} options.bucket - The namespace for this limit (e.g., 'turn', 'tactical')
+ * @param {number} [options.maxRequests=12] - Maximum requests allowed per window
+ * @param {number} [options.windowMs=60000] - Window duration in milliseconds
  * @returns {boolean} True if limited, False if permitted
  */
-exports.isRateLimited = function(req, maxRequests = 12, windowMs = 60000) {
+exports.isRateLimited = function(req, { bucket, maxRequests = 12, windowMs = 60000 }) {
   const ip = getClientIp(req);
+  const key = `${bucket}:${ip}`;
   const now = Date.now();
   
   // Cleanup expired entries
@@ -33,12 +36,17 @@ exports.isRateLimited = function(req, maxRequests = 12, windowMs = 60000) {
   // Prevent unbounded memory growth
   if (visitors.size > 5000) visitors.clear();
   
-  const v = visitors.get(ip) || { count: 0, reset: now + windowMs };
+  const v = visitors.get(key) || { count: 0, reset: now + windowMs };
   if (v.count >= maxRequests) {
     return true; // Rate limited
   }
   
   v.count++;
-  visitors.set(ip, v);
+  visitors.set(key, v);
   return false;
+};
+
+// Exposed for testing purposes only
+exports._resetForTests = function() {
+  visitors.clear();
 };
