@@ -92,9 +92,10 @@ The audit document is deliberately **not** a deployment gate. `qa/principles.cjs
 ## Resolved during this audit
 
 - Vercel previews no longer rerun the entire QA suite. `npm run build` performs deterministic deployment sanity only; GitHub Actions remains the full QA gate.
-- `qa/principles.cjs` no longer fails releases because a markdown inventory missed a filename; it enforces actual architectural and behavioural invariants.
-- The previously missing `docs/PRINCIPLES_AUDIT.md` now exists, so the ENOENT deployment failure is removed.
+- `qa/principles.cjs` no longer fails releases because a markdown inventory missed a filename or because a documentation heading changed; it enforces actual architectural and behavioural invariants.
+- The previously missing `docs/PRINCIPLES_AUDIT.md` now exists, removing the ENOENT deployment failure.
 - Turn API tests use a stubbed provider. Simulated `502 invalid_model_output` and `429 rate_limit` diagnostics are test cases, not live Groq calls.
+- Preview deployments at and after the deterministic-build change have reached Vercel `READY`, confirming the repeated preview-failure chain is resolved.
 
 ## Remaining maintainability work
 
