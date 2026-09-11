@@ -36,14 +36,21 @@ function mergeAdvantage(base,state,kind){
 function attackDamage(state,resolution,roll=randomInt,action=''){
   const r=resolution?.roll;if(resolution?.kind!=='attack'||!r?.success)return {amount:0,text:''};
   const crit=!!r.critical;let amount=0,label='';
+  const level=typeof state.level==='number'?state.level:2;
   if(state.cls==='fighter'){
     const first=die(8,roll),extra=crit?die(8,roll):0;amount=first+extra+3;label=`Longsword ${first}${crit?` + ${extra} critical die`:''} + 3`;
   }else if(state.cls==='rogue'){
     const first=die(6,roll),extra=crit?die(6,roll):0;let sneak=0,sneakCrit=0;
-    if(r.advantage==='advantage'||/\b(sneak|hidden|from hiding)\b/i.test(action)){sneak=die(6,roll);if(crit)sneakCrit=die(6,roll)}
+    const sneakDice=level>=5?3:(level>=3?2:1);
+    if(r.advantage==='advantage'||/\b(sneak|hidden|from hiding)\b/i.test(action)){
+       for(let i=0;i<sneakDice;i++){sneak+=die(6,roll);if(crit)sneakCrit+=die(6,roll)}
+    }
     amount=first+extra+3+sneak+sneakCrit;label=`Weapon ${first}${crit?` + ${extra} critical die`:''} + 3${sneak?` + sneak ${sneak}${sneakCrit?` + ${sneakCrit}`:''}`:''}`;
   }else{
-    const first=die(10,roll),extra=crit?die(10,roll):0;amount=first+extra;label=`Fire Bolt ${first}${crit?` + ${extra} critical die`:''}`;
+    const diceCount=level>=5?2:1;
+    let first=0,extra=0;
+    for(let i=0;i<diceCount;i++){first+=die(10,roll);if(crit)extra+=die(10,roll)}
+    amount=first+extra;label=`Fire Bolt ${first}${crit?` + ${extra} critical die`:''}`;
   }
   return {amount:clamp(amount,0,50),text:label};
 }
@@ -65,4 +72,55 @@ function rollDeathSave(state,roll=randomInt){
 function applyConditionChanges(current,added,removed){
   const set=new Set(normaliseConditions(current));for(const c of normaliseConditions(removed))set.delete(c);for(const c of normaliseConditions(added))set.add(c);return [...set].slice(0,6);
 }
-module.exports={CONDITIONS,ORIGINS,BACKGROUNDS,TONES,normaliseChoice,normaliseConditions,backgroundProficient,mergeAdvantage,attackDamage,automaticSpellDamage,freshDeathSaves,rollDeathSave,applyConditionChanges};
+
+const MAX_LEVEL=5;
+function xpThreshold(level){
+  if(level<=2)return 0;if(level===3)return 75;if(level===4)return 150;return 250;
+}
+function proficiencyBonus(level){
+  return level>=5?3:2;
+}
+function maxWizardSlots(level){
+  return Math.min(6,level+1);
+}
+function criticalThreshold(state){
+  return state.cls==='fighter'&&state.level>=3?19:20;
+}
+function levelUp(state){
+  if(typeof state.level!=='number')state.level=2;
+  if(typeof state.xp!=='number')state.xp=0;
+  
+  const levelsGained=[];
+  let hpIncrease=0;
+  const unlocks=[];
+
+  while(state.level<MAX_LEVEL&&state.xp>=xpThreshold(state.level+1)){
+    state.level++;
+    levelsGained.push(state.level);
+    let hpGain=5;
+    if(state.cls==='fighter')hpGain=8;
+    else if(state.cls==='rogue')hpGain=6;
+    else if(state.cls==='wizard')hpGain=5;
+    
+    state.maxHp+=hpGain;
+    state.hp+=hpGain;
+    hpIncrease+=hpGain;
+    
+    if(state.cls==='wizard')state.slots=maxWizardSlots(state.level);
+    
+    if(state.cls==='fighter'&&state.level===3)unlocks.push('Champion Path: Improved Critical (19-20)');
+    if(state.cls==='rogue'&&state.level===3)unlocks.push('Sneak Attack increased to 2d6');
+    if(state.cls==='rogue'&&state.level===5)unlocks.push('Sneak Attack increased to 3d6');
+    if(state.cls==='wizard'&&state.level===5)unlocks.push('Fire Bolt damage increased to 2d10');
+    if(state.level===5)unlocks.push('Proficiency Bonus increased to +3');
+  }
+  
+  state.hp=Math.min(state.hp,state.maxHp);
+  
+  if(levelsGained.length>0){
+    return {levelsGained,hpIncrease,newLevel:state.level,unlocks};
+  }
+  return null;
+}
+
+module.exports={CONDITIONS,ORIGINS,BACKGROUNDS,TONES,normaliseChoice,normaliseConditions,backgroundProficient,mergeAdvantage,attackDamage,automaticSpellDamage,freshDeathSaves,rollDeathSave,applyConditionChanges,MAX_LEVEL,xpThreshold,proficiencyBonus,maxWizardSlots,criticalThreshold,levelUp};

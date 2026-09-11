@@ -99,4 +99,103 @@ test('provider uses smaller output budget for planning than narration',async()=>
   P.resetForTests();const seen=[];const env={GROQ_API_KEYS:JSON.stringify(['gsk_test_primary_0000000000']),GROQ_MODEL:'model-a',GROQ_FALLBACK_MODEL:'model-a'};const fetcher=async(url,options)=>{seen.push(JSON.parse(options.body));return {status:200,ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'}}]})}};const schema={type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false};await P.generate([],schema,{env,fetcher,stage:'plan'});P.resetForTests();await P.generate([],schema,{env,fetcher,stage:'narrate'});assert(seen[0].max_completion_tokens<seen[1].max_completion_tokens);assert(seen[0].temperature<seen[1].temperature);
 });
 
+test('XP threshold not yet reached -> no level', ()=>{
+  const s=W.initial('F','fighter');
+  const updated=W.apply(s,result(s,{xpGain:25}),'action',{blocked:false,healing:0});
+  assert.equal(updated.level,2);assert.equal(updated.xp,25);
+});
+
+test('exact threshold -> one level, HP scaling is correct, returns levelUpEvent', ()=>{
+  const s=W.initial('F','fighter');
+  let updated=W.apply(s,result(s,{xpGain:25}),'a',{blocked:false,healing:0});
+  updated=W.apply(updated,result(updated,{xpGain:25}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,2);
+  updated=W.apply(updated,result(updated,{xpGain:25}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,3);assert.equal(updated.xp,75);
+  assert.equal(updated.maxHp,32);assert.equal(updated.hp,32);
+  assert(updated.progressionEvent);
+  assert.deepEqual(updated.progressionEvent.levelsGained,[3]);
+  assert.equal(updated.progressionEvent.hpIncrease,8);
+  assert.equal(updated.progressionEvent.newLevel,3);
+  assert(updated.progressionEvent.unlocks.includes('Champion Path: Improved Critical (19-20)'));
+  assert(updated.narrative.includes('LEVEL UP!'));
+});
+
+test('L3 / 75 XP restored repeatedly remains L3 with the same max HP (Idempotency)', ()=>{
+  const s={...W.initial('F','fighter'),level:3,xp:75,maxHp:32,hp:32};
+  const updated=W.apply(s,result(s,{xpGain:0}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,3);
+  assert.equal(updated.maxHp,32);
+  assert.equal(updated.progressionEvent,undefined); // No level up triggered
+});
+
+test('L4 / 170 XP restored repeatedly does not reapply L3 or L4 HP gains', ()=>{
+  const s={...W.initial('F','fighter'),level:4,xp:170,maxHp:40,hp:40};
+  const updated=W.apply(s,result(s,{xpGain:0}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,4);
+  assert.equal(updated.maxHp,40);
+  assert.equal(updated.progressionEvent,undefined);
+});
+
+test('saving and restoring after a level-up does not award benefits again', ()=>{
+  const s={...W.initial('R','rogue'),xp:70};
+  let updated=W.apply(s,result(s,{xpGain:5}),'a',{blocked:false,healing:0}); // hits 75
+  assert.equal(updated.level,3);
+  assert.equal(updated.maxHp,24);
+  
+  // Simulate save/restore cycle
+  const savedAndRestored = W.upgrade(updated);
+  const nextTurn = W.apply(savedAndRestored,result(savedAndRestored,{xpGain:0}),'a',{blocked:false,healing:0});
+  assert.equal(nextTurn.level,3);
+  assert.equal(nextTurn.maxHp,24);
+  assert.equal(nextTurn.progressionEvent,undefined);
+});
+
+test('current HP never exceeding new max HP', ()=>{
+  const s={...W.initial('W','wizard'),xp:70,maxHp:14,hp:14}; // already full health
+  let updated=W.apply(s,result(s,{xpGain:5,hpChange:5}),'a',{blocked:false,healing:0}); // hit 75, also AI gave +5 HP for some reason
+  assert.equal(updated.level,3);
+  assert.equal(updated.maxHp, 19); // 14 + 5
+  assert.equal(updated.hp, 19); // should not exceed 19
+});
+
+test('XP overshoot -> level correctly multiple times', ()=>{
+  const s={...W.initial('F','fighter'),hp:5,xp:155};
+  const updated=W.apply(s,result(s,{xpGain:0}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,4);assert.equal(updated.maxHp,24+16);assert.equal(updated.hp,5+16);
+  assert.deepEqual(updated.progressionEvent.levelsGained,[3,4]);
+});
+
+test('level cannot exceed 5', ()=>{
+  const s={...W.initial('F','fighter'),xp:300};
+  const updated=W.apply(s,result(s,{xpGain:0}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,5);assert.equal(updated.maxHp,24+24);
+});
+
+test('proficiency +2 through L4, +3 at L5', ()=>{
+  const W_rules=require('../server/rules.cjs');
+  assert.equal(W_rules.proficiencyBonus(2),2);
+  assert.equal(W_rules.proficiencyBonus(4),2);
+  assert.equal(W_rules.proficiencyBonus(5),3);
+});
+
+test('Rogue HP growth', ()=>{
+  const s={...W.initial('R','rogue'),xp:75};
+  const updated=W.apply(s,result(s,{xpGain:0}),'a',{blocked:false,healing:0});
+  assert.equal(updated.level,3);assert.equal(updated.maxHp,18+6);
+});
+
+test('Wizard HP growth, resources scale/rest correctly', ()=>{
+  const s={...W.initial('W','wizard'),xp:75,hp:2,slots:0};
+  const updated=W.apply(s,result(s,{xpGain:0,rest:'long',time:'rest'}),'rest',{blocked:false,healing:0});
+  assert.equal(updated.level,3);assert.equal(updated.maxHp,14+5);assert.equal(updated.slots,4);
+});
+
+test('old save migration initializes level 2 and xp 0', ()=>{
+  const legacy=W.initial('R','fighter');
+  delete legacy.level;delete legacy.xp;
+  const out=W.upgrade(legacy);
+  assert.equal(out.level,2);assert.equal(out.xp,0);
+});
+
 (async()=>{let failures=0;for(const t of tests){try{await t.fn();console.log('✓',t.name)}catch(error){failures++;console.error('✗',t.name);console.error(error.stack||error)}}if(failures){console.error(`\n${failures} QA rule test(s) failed.`);process.exit(1)}console.log(`\n${tests.length} QA rule tests passed.`)})().catch(error=>{console.error(error);process.exit(1)});
