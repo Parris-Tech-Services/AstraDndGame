@@ -6,6 +6,7 @@ on:
       - main
       - 'qa/**'
       - 'upgrade/**'
+      - 'audit/**'
   workflow_dispatch:
 
 permissions:
@@ -19,23 +20,26 @@ jobs:
   unit-and-api:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Pin action commits so a passing commit is tested with the same CI implementation later.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - run: npm install
+          cache: npm
+      - run: npm ci
       - run: npm test
 
   browser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - run: npm install
-      - run: npm install --no-save playwright@latest
-      - run: npx playwright install --with-deps chromium
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save playwright@1.63.0
+      - run: npx --no-install playwright install --with-deps chromium
       - run: node qa/browser.cjs
       - run: node qa/mobile-story-first.cjs
       - run: node qa/crossrepo-browser.cjs
@@ -46,8 +50,8 @@ jobs:
     needs: [unit-and-api, browser]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
       - run: node qa/live-smoke.cjs

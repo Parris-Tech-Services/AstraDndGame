@@ -1,62 +1,99 @@
 'use strict';
-const G=window.Blackthorn,$=id=>document.getElementById(id),key='astra-open-world-v3';let campaign=null,busy=false,ready=false,cooldown=0,retry=null;
+const G=window.Blackthorn,V=window.AstraValidation,$=id=>document.getElementById(id),storageKey='astra-open-world-v3';
+if(!G||!V)throw new Error('Astra core modules did not load.');
+let campaign=null,busy=false,cooldown=0,retry=null,renderedCampaignId=null,renderedHistoryCount=0;
 const OPENING='Rain beads on your cloak. Ahead, Blackthorn huddles beneath a ruined abbey. Its bell tower has no bell.\n\nA woman waits beside the road with a lantern and a child’s muddy shoe. “They walked out of the graves,” she says. “My daughter followed them.”\n\nTo the west, a river road leads towards the trading town of Greyhaven. North, an old forest swallows the king’s highway. Somewhere under the abbey, a bell begins to sound.\n\nThe road is yours. What do you do?';
-const arrays=['inventory','npcs','quests','places','suggestions','history'];
-const origins={human:'Human',elf:'Elf',dwarf:'Dwarf',halfling:'Halfling',tiefling:'Tiefling',dragonborn:'Dragonborn'},backgrounds={outlander:'Outlander',soldier:'Soldier',sage:'Sage',acolyte:'Acolyte',criminal:'Criminal',artisan:'Artisan',noble:'Noble',urchin:'Urchin'},tones={balanced:'Balanced adventure',heroic:'Heroic fantasy',mystery:'Dark mystery',whimsical:'Whimsical fantasy'};
-function validState(s){
-  return !!(s&&s.version===3&&G.classes[s.cls]&&typeof s.id==='string'&&typeof s.name==='string'&&Number.isFinite(s.turn)&&Number.isFinite(s.level)&&Number.isFinite(s.xp)&&Number.isFinite(s.hp)&&Number.isFinite(s.maxHp)&&s.maxHp>0&&Number.isFinite(s.ac)&&Number.isFinite(s.slots)&&Number.isFinite(s.potions)&&Number.isFinite(s.gold)&&typeof s.location==='string'&&typeof s.time==='string'&&typeof s.narrative==='string'&&arrays.every(k=>Array.isArray(s[k]))&&s.inventory.every(x=>typeof x==='string')&&s.npcs.every(x=>typeof x==='string')&&s.quests.every(x=>typeof x==='string')&&s.places.every(x=>typeof x==='string')&&s.suggestions.every(x=>typeof x==='string')&&s.history.every(h=>h&&typeof h.action==='string'&&typeof h.narrative==='string'));
+const safeArray=(value,fallback=[])=>Array.isArray(value)&&value.every(item=>typeof item==='string')?value:fallback;
+function readSavedCampaign(){
+  let raw=null;try{raw=localStorage.getItem(storageKey)}catch{return null}
+  const parsed=V.parseCampaign(raw);if(parsed)return parsed;
+  if(raw)try{localStorage.removeItem(storageKey)}catch{}
+  return null;
 }
-function validCampaign(v){return !!(v&&typeof v.save==='string'&&v.save.length>10&&validState(v.state))}
-try{const saved=JSON.parse(localStorage.getItem(key));if(validCampaign(saved))campaign=saved;else if(saved)localStorage.removeItem(key)}catch{try{localStorage.removeItem(key)}catch{}}
-const safeArray=(v,fallback=[])=>Array.isArray(v)&&v.every(x=>typeof x==='string')?v:fallback;
-const safeList=(items,target)=>{target.replaceChildren();for(const value of items||[]){if(typeof value!=='string')continue;const p=document.createElement('p');p.textContent=value;target.append(p)}};
+campaign=readSavedCampaign();
+function selectLabel(id,value,fallback){const option=[...($(id)?.options||[])].find(item=>item.value===value);return option?.textContent||fallback}
+function safeList(items,target){target.replaceChildren();for(const value of items||[]){if(typeof value!=='string')continue;const p=document.createElement('p');p.textContent=value;target.append(p)}}
 function logEntry(title,text,kind='story'){const div=document.createElement('div');div.className='entry '+kind;const h=document.createElement('h4');h.textContent=title;const p=document.createElement('p');p.textContent=text;div.append(h,p);return div}
 function codex(title,sections){
   $('codexTitle').textContent=title;$('codexBody').replaceChildren();
-  for(const section of sections){const wrap=document.createElement('section');const h=document.createElement('h3');h.textContent=section.title;wrap.append(h);const values=Array.isArray(section.lines)?section.lines:[section.lines];if(!values.length){const p=document.createElement('p');p.className='small';p.textContent='Nothing recorded yet.';wrap.append(p)}else for(const line of values){const p=document.createElement('p');p.textContent=line;wrap.append(p)}$('codexBody').append(wrap)}
+  for(const section of sections){
+    const wrap=document.createElement('section'),heading=document.createElement('h3');heading.textContent=section.title;wrap.append(heading);
+    const values=Array.isArray(section.lines)?section.lines:[section.lines];
+    if(!values.length){const p=document.createElement('p');p.className='small';p.textContent='Nothing recorded yet.';wrap.append(p)}
+    else for(const line of values){const p=document.createElement('p');p.textContent=line;wrap.append(p)}
+    $('codexBody').append(wrap);
+  }
   $('codex').showModal();
 }
 function localCommand(raw){
-  const s=campaign?.state;if(!s)return false;const cmd=raw.trim().toLowerCase().split(/\s+/)[0],c=G.classes[s.cls];
-  if(!cmd.startsWith('/'))return false;
-  const conditions=safeArray(s.conditions),ds=s.deathSaves||{successes:0,failures:0,stable:false,defeated:false};
-  if(cmd==='/help')codex('Local commands',[{title:'Commands',lines:['/sheet — character identity, stats and conditions','/map — current place, danger and nearby routes','/quests — active quest log','/inventory — gear, potions, gold and class resources','/journal — durable facts, factions and significant events','/recap — campaign memory plus recent turns','These commands are local and do not spend a Groq turn.']}]);
-  else if(cmd==='/sheet'||cmd==='/status')codex(`${s.name} · character sheet`,[{title:'Identity',lines:[`Level ${s.level} ${origins[s.origin]||'Human'} ${c.name} · ${backgrounds[s.background]||'Outlander'}`,s.backstory||'No backstory recorded.',s.goal?`Goal: ${s.goal}`:'No personal goal recorded.',`Tone: ${tones[s.tone]||'Balanced adventure'}`]},{title:'Vitals',lines:[`HP ${s.hp}/${s.maxHp} · AC ${s.ac} · ${s.xp} XP`,...Object.entries(c.stats).map(([k,v])=>`${k} ${v>=0?'+':''}${v}`),conditions.length?`Conditions: ${conditions.join(', ')}`:'Conditions: none',s.hp===0?`Death saves: ${ds.successes} successes / ${ds.failures} failures`:null].filter(Boolean)},{title:'Class ability',lines:[c.ability]}]);
-  else if(cmd==='/map'||cmd==='/location')codex('Map & routes',[{title:s.location,lines:[`${s.time} · ${String(s.danger||'tense').toUpperCase()}`,...(safeArray(s.exits).length?safeArray(s.exits):safeArray(s.places).slice(0,4)).map(x=>'→ '+x)]},{title:'Discovered places',lines:safeArray(s.places)}]);
-  else if(cmd==='/quests')codex('Quest log',[{title:'Active threads',lines:safeArray(s.quests)}]);
-  else if(cmd==='/inventory')codex('Inventory',[{title:'Resources',lines:[`${s.potions} healing potion${s.potions===1?'':'s'} · ${s.gold} gold`,s.cls==='wizard'?`${s.slots}/3 spell slots`:null,s.cls==='fighter'?`Second Wind ${s.secondWindReady===false?'spent':'ready'}`:null].filter(Boolean)},{title:'Pack',lines:safeArray(s.inventory)}]);
-  else if(cmd==='/journal')codex('Campaign journal',[{title:'Durable facts',lines:safeArray(s.facts)},{title:'Significant events',lines:safeArray(s.journalEvents)},{title:'Factions',lines:safeArray(s.factions)},{title:'People',lines:safeArray(s.npcs)}]);
-  else if(cmd==='/recap')codex('Story so far',[{title:'Campaign memory',lines:[s.memory||'No recap yet.']},{title:'Recent turns',lines:s.history.slice(-3).flatMap(h=>[`${s.name}: ${h.action}`,`DM: ${h.narrative}`])}]);
+  const state=campaign?.state;if(!state)return false;const command=raw.trim().toLowerCase().split(/\s+/)[0],character=G.classes[state.cls];if(!command.startsWith('/'))return false;
+  const conditions=safeArray(state.conditions),deathSaves=state.deathSaves||{successes:0,failures:0,stable:false,defeated:false};
+  if(command==='/help')codex('Local commands',[{title:'Commands',lines:['/sheet — character identity, stats and conditions','/map — current place, danger and nearby routes','/quests — active quest log','/inventory — gear, potions, gold and class resources','/journal — durable facts, factions and significant events','/recap — campaign memory plus recent turns','These commands are local and do not spend a Groq turn.']}]);
+  else if(command==='/sheet'||command==='/status')codex(`${state.name} · character sheet`,[{title:'Identity',lines:[`Level ${state.level} ${selectLabel('origin',state.origin,'Human')} ${character.name} · ${selectLabel('background',state.background,'Outlander')}`,state.backstory||'No backstory recorded.',state.goal?`Goal: ${state.goal}`:'No personal goal recorded.',`Tone: ${selectLabel('tone',state.tone,'Balanced adventure')}`]},{title:'Vitals',lines:[`HP ${state.hp}/${state.maxHp} · AC ${state.ac} · ${state.xp} XP`,...Object.entries(character.stats).map(([key,value])=>`${key} ${value>=0?'+':''}${value}`),conditions.length?`Conditions: ${conditions.join(', ')}`:'Conditions: none',state.hp===0?`Death saves: ${deathSaves.successes} successes / ${deathSaves.failures} failures`:null].filter(Boolean)},{title:'Class ability',lines:[character.ability]}]);
+  else if(command==='/map'||command==='/location')codex('Map & routes',[{title:state.location,lines:[`${state.time} · ${String(state.danger||'tense').toUpperCase()}`,...(safeArray(state.exits).length?safeArray(state.exits):safeArray(state.places).slice(0,4)).map(route=>'→ '+route)]},{title:'Discovered places',lines:safeArray(state.places)}]);
+  else if(command==='/quests')codex('Quest log',[{title:'Active threads',lines:safeArray(state.quests)}]);
+  else if(command==='/inventory')codex('Inventory',[{title:'Resources',lines:[`${state.potions} healing potion${state.potions===1?'':'s'} · ${state.gold} gold`,state.cls==='wizard'?`${state.slots}/3 spell slots`:null,state.cls==='fighter'?`Second Wind ${state.secondWindReady===false?'spent':'ready'}`:null].filter(Boolean)},{title:'Pack',lines:safeArray(state.inventory)}]);
+  else if(command==='/journal')codex('Campaign journal',[{title:'Durable facts',lines:safeArray(state.facts)},{title:'Significant events',lines:safeArray(state.journalEvents)},{title:'Factions',lines:safeArray(state.factions)},{title:'People',lines:safeArray(state.npcs)}]);
+  else if(command==='/recap')codex('Story so far',[{title:'Campaign memory',lines:[state.memory||'No recap yet.']},{title:'Recent turns',lines:state.history.slice(-3).flatMap(entry=>[`${state.name}: ${entry.action}`,`DM: ${entry.narrative}`])}]);
   else codex('Unknown command',[{title:'Try one of these',lines:['/help · /sheet · /map · /quests · /inventory · /journal · /recap']}]);
   return true;
 }
+function renderStory(state){
+  const story=$('story'),history=state.history||[],needsReset=renderedCampaignId!==state.id||renderedHistoryCount>history.length||story.childElementCount===0;
+  const wasNearBottom=story.scrollHeight-story.scrollTop-story.clientHeight<90;
+  if(needsReset){story.replaceChildren(logEntry('The Dungeon Master',typeof state.prologue==='string'&&state.prologue.trim()?state.prologue:OPENING));renderedCampaignId=state.id;renderedHistoryCount=0}
+  for(const entry of history.slice(renderedHistoryCount))story.append(logEntry(state.name,entry.action,'action'),logEntry('The Dungeon Master',entry.narrative));
+  renderedHistoryCount=history.length;
+  if(wasNearBottom||needsReset)story.scrollTop=story.scrollHeight;
+}
+function renderStats(character){
+  $('stats').replaceChildren();for(const [key,value] of Object.entries(character.stats)){const div=document.createElement('div'),bold=document.createElement('b');div.textContent=key;bold.textContent=(value>=0?'+':'')+value;div.append(bold);$('stats').append(div)}
+}
+function renderConditions(state){
+  const conditions=safeArray(state.conditions),deathSaves=state.deathSaves||{successes:0,failures:0};$('conditions').replaceChildren();
+  if(conditions.length)for(const condition of conditions){const span=document.createElement('span');span.textContent=condition;$('conditions').append(span)}else{const span=document.createElement('span');span.className='clear';span.textContent='No conditions';$('conditions').append(span)}
+  if(state.hp===0){const span=document.createElement('span');span.className='dangerchip';span.textContent=`Death saves ${deathSaves.successes||0}/${deathSaves.failures||0}`;$('conditions').append(span)}
+}
 function render(){
-  const s=campaign?.state;$('creation').hidden=!!s;$('game').hidden=!s;if(!s)return;
-  const c=G.classes[s.cls],windReady=s.cls==='fighter'&&s.secondWindReady!==false,conditions=safeArray(s.conditions),ds=s.deathSaves||{successes:0,failures:0};
-  $('heroName').textContent=s.name;$('heroClass').textContent=`LEVEL ${s.level} ${c.name.toUpperCase()} · ${s.xp} XP`;$('identity').textContent=`${origins[s.origin]||'Human'} · ${backgrounds[s.background]||'Outlander'} · ${tones[s.tone]||'Balanced adventure'}`;$('hp').textContent=s.hp+' / '+s.maxHp;$('ac').textContent=s.ac;$('health').style.width=Math.max(0,Math.min(100,s.hp/s.maxHp*100))+'%';
-  $('stats').replaceChildren();for(const[k,v]of Object.entries(c.stats)){const d=document.createElement('div');d.textContent=k;const b=document.createElement('b');b.textContent=(v>=0?'+':'')+v;d.append(b);$('stats').append(d)}
-  $('conditions').replaceChildren();if(conditions.length)for(const condition of conditions){const span=document.createElement('span');span.textContent=condition;$('conditions').append(span)}else{const span=document.createElement('span');span.className='clear';span.textContent='No conditions';$('conditions').append(span)}if(s.hp===0){const span=document.createElement('span');span.className='dangerchip';span.textContent=`Death saves ${ds.successes||0}/${ds.failures||0}`;$('conditions').append(span)}
-  $('pack').replaceChildren();const count=document.createElement('p');count.textContent=`${s.potions} potions · ${s.gold} gold`+(s.cls==='wizard'?` · ${s.slots}/3 spell slots`:'')+(s.cls==='fighter'?` · Second Wind ${windReady?'ready':'spent'}`:'');$('pack').append(count);for(const item of s.inventory){const p=document.createElement('p');p.textContent=item;$('pack').append(p)}
-  $('abilities').textContent=s.cls==='wizard'?'Fire Bolt is a cantrip. Levelled spells consume a slot. Magic Missile automatically hits with server-rolled damage. A long rest restores slots.':s.cls==='rogue'?'Use stealth, misdirection and precise attacks. Advantage can enable server-rolled sneak damage. Your background may grant proficiency when it fits the fiction.':'Use your strength, armour and longsword. Second Wind restores 1d10 + 2 HP once and refreshes after a successful rest. Successful attacks roll damage on the server.';
-  $('journal').replaceChildren();for(const q of s.quests){const li=document.createElement('li');li.textContent=q;$('journal').append(li)}
-  safeList((safeArray(s.exits).length?safeArray(s.exits):safeArray(s.places).slice(0,4)), $('routes'));safeList([...safeArray(s.npcs),...safeArray(s.factions),...safeArray(s.places)],$('worldnotes'));safeList([...safeArray(s.facts),...safeArray(s.journalEvents).slice(-6)],$('facts'));
-  $('chapter').textContent=s.location;$('chapterNo').textContent=`TURN ${s.turn} · ${String(s.danger||'tense').toUpperCase()}`;$('story').replaceChildren();$('story').append(logEntry('The Dungeon Master',typeof s.prologue==='string'&&s.prologue.trim()?s.prologue:OPENING));for(const h of s.history){$('story').append(logEntry(s.name,h.action,'action'),logEntry('The Dungeon Master',h.narrative))}$('story').scrollTop=$('story').scrollHeight;
-  $('enemy').hidden=true;const r=s.lastRoll;$('dice').textContent=r?.die||'d20';$('roll').textContent=r&&Array.isArray(r.dice)?`${r.ability} · [${r.dice.join(', ')}] ${r.modifier>=0?'+':''}${r.modifier} = ${r.total} / DC ${r.dc} · ${r.success?'SUCCESS':'FAILURE'}${r.critical?' · CRITICAL':''}${s.lastDamage?` · ${s.lastDamage} DAMAGE`:''}`:s.time;
-  $('choices').replaceChildren();for(const suggestion of s.suggestions){const b=document.createElement('button');b.textContent=suggestion;b.onclick=()=>run(suggestion);b.disabled=busy||Date.now()<cooldown;$('choices').append(b)}
-  $('potion').disabled=busy||!s.potions||s.hp>=s.maxHp;$('wind').hidden=s.cls!=='fighter';$('wind').disabled=busy||s.hp>=s.maxHp||!windReady;$('rest').disabled=busy;$('newgame').disabled=busy;$('input').disabled=busy;$('command').querySelector('button').disabled=busy;
-  try{localStorage.setItem(key,JSON.stringify(campaign));$('savestatus').textContent='PROGRESS SAVED ON THIS DEVICE'}catch{$('savestatus').textContent='SAVE UNAVAILABLE · KEEP THIS TAB OPEN'}
+  const state=campaign?.state;$('creation').hidden=!!state;$('game').hidden=!state;if(!state)return;
+  const character=G.classes[state.cls],windReady=state.cls==='fighter'&&state.secondWindReady!==false;
+  $('heroName').textContent=state.name;$('heroClass').textContent=`LEVEL ${state.level} ${character.name.toUpperCase()} · ${state.xp} XP`;$('identity').textContent=`${selectLabel('origin',state.origin,'Human')} · ${selectLabel('background',state.background,'Outlander')} · ${selectLabel('tone',state.tone,'Balanced adventure')}`;
+  $('hp').textContent=state.hp+' / '+state.maxHp;$('ac').textContent=state.ac;$('health').style.width=Math.max(0,Math.min(100,state.hp/state.maxHp*100))+'%';renderStats(character);renderConditions(state);
+  $('pack').replaceChildren();const count=document.createElement('p');count.textContent=`${state.potions} potions · ${state.gold} gold`+(state.cls==='wizard'?` · ${state.slots}/3 spell slots`:'')+(state.cls==='fighter'?` · Second Wind ${windReady?'ready':'spent'}`:'');$('pack').append(count);for(const item of state.inventory){const p=document.createElement('p');p.textContent=item;$('pack').append(p)}
+  $('abilities').textContent=state.cls==='wizard'?'Fire Bolt is a cantrip. Levelled spells consume a slot. Magic Missile automatically hits with server-rolled damage. A long rest restores slots.':state.cls==='rogue'?'Use stealth, misdirection and precise attacks. Advantage can enable server-rolled sneak damage. Your background may grant proficiency when it fits the fiction.':'Use your strength, armour and longsword. Second Wind restores 1d10 + 2 HP once and refreshes after a successful rest. Successful attacks roll damage on the server.';
+  $('journal').replaceChildren();for(const quest of state.quests){const item=document.createElement('li');item.textContent=quest;$('journal').append(item)}
+  safeList(safeArray(state.exits).length?safeArray(state.exits):safeArray(state.places).slice(0,4),$('routes'));safeList([...safeArray(state.npcs),...safeArray(state.factions),...safeArray(state.places)],$('worldnotes'));safeList([...safeArray(state.facts),...safeArray(state.journalEvents).slice(-6)],$('facts'));
+  $('chapter').textContent=state.location;$('chapterNo').textContent=`TURN ${state.turn} · ${String(state.danger||'tense').toUpperCase()}`;renderStory(state);
+  $('enemy').hidden=true;const roll=state.lastRoll;$('dice').textContent=roll?.die||'d20';$('roll').textContent=roll&&Array.isArray(roll.dice)?`${roll.ability} · [${roll.dice.join(', ')}] ${roll.modifier>=0?'+':''}${roll.modifier} = ${roll.total} / DC ${roll.dc} · ${roll.success?'SUCCESS':'FAILURE'}${roll.critical?' · CRITICAL':''}${state.lastDamage?` · ${state.lastDamage} DAMAGE`:''}`:state.time;
+  $('choices').replaceChildren();for(const suggestion of state.suggestions){const button=document.createElement('button');button.textContent=suggestion;button.onclick=()=>run(suggestion);button.disabled=busy||Date.now()<cooldown;$('choices').append(button)}
+  $('potion').disabled=busy||!state.potions||state.hp>=state.maxHp;$('wind').hidden=state.cls!=='fighter';$('wind').disabled=busy||state.hp>=state.maxHp||!windReady;$('rest').disabled=busy;$('newgame').disabled=busy;$('input').disabled=busy;$('command').querySelector('button').disabled=busy;
+  try{localStorage.setItem(storageKey,JSON.stringify(campaign));$('savestatus').textContent='PROGRESS SAVED ON THIS DEVICE'}catch{$('savestatus').textContent='SAVE UNAVAILABLE · KEEP THIS TAB OPEN'}
 }
 async function call(body){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),105000);
-  try{const response=await fetch('/api/turn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});let data;try{data=await response.json()}catch{throw new Error('The dungeon master did not return a readable response. Your save is unchanged.')}if(!response.ok){if(data.retryAfter)cooldown=Date.now()+data.retryAfter*1000;throw new Error(data.error||'The dungeon master is unavailable. Please try again.')}if(!validCampaign(data))throw new Error('The returned turn was incomplete. Your previous save is safe.');return data}finally{clearTimeout(timer)}
+  try{
+    const response=await fetch('/api/turn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
+    let data;try{data=await response.json()}catch{throw new Error('The dungeon master did not return a readable response. Your save is unchanged.')}
+    if(!response.ok){if(data.retryAfter)cooldown=Date.now()+data.retryAfter*1000;throw new Error(data.error||'The dungeon master is unavailable. Please try again.')}
+    if(!V.validCampaign(data))throw new Error('The returned turn was incomplete. Your previous save is safe.');return data;
+  }finally{clearTimeout(timer)}
 }
 async function run(action){
   action=action.trim();if(!campaign||busy||!action)return;if(localCommand(action)){$('input').value='';return}
   if(Date.now()<cooldown){$('turnstatus').textContent=`The DM needs ${Math.ceil((cooldown-Date.now())/1000)} more seconds. Your action is still in the box.`;return}
-  busy=true;render();$('turnstatus').textContent=safeArray(campaign.state.conditions).includes('unconscious')?'Fate turns the die…':'The dungeon master considers your action…';const save=campaign.save;const requestId=retry?.action===action&&retry?.save===save?retry.requestId:crypto.randomUUID();retry={action,save,requestId};let timer=setTimeout(()=>{$('turnstatus').textContent='Rolling the dice and weaving the consequences…'},5000);
-  try{const result=await call({action,save,requestId});campaign={state:result.state,save:result.save};retry=null;$('input').value='';$('turnstatus').textContent='';}catch(e){$('input').value=action;$('turnstatus').textContent=e.name==='AbortError'?'The turn took too long. Your save is unchanged. Try the action again.':e.message}finally{clearTimeout(timer);busy=false;render()}
+  busy=true;render();$('turnstatus').textContent=safeArray(campaign.state.conditions).includes('unconscious')?'Fate turns the die…':'The dungeon master considers your action…';
+  const before=campaign,save=campaign.save,requestId=retry?.action===action&&retry?.save===save?retry.requestId:crypto.randomUUID();retry={action,save,requestId};const statusTimer=setTimeout(()=>{$('turnstatus').textContent='Rolling the dice and weaving the consequences…'},5000);
+  try{const result=await call({action,save,requestId});window.AstraExtras?.captureUndo(before,result);campaign={state:result.state,save:result.save};retry=null;$('input').value='';$('turnstatus').textContent=''}
+  catch(error){$('input').value=action;$('turnstatus').textContent=error.name==='AbortError'?'The turn took too long. Your save is unchanged. Try the action again.':error.message}
+  finally{clearTimeout(statusTimer);busy=false;render()}
 }
-$('heroform').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;const b=e.target.querySelector('button[type="submit"]');b.disabled=true;$('availability').textContent='Preparing your campaign…';try{const result=await call({start:true,name:$('name').value,cls:new FormData(e.target).get('class'),origin:$('origin').value,background:$('background').value,tone:$('tone').value,backstory:$('backstory').value,goal:$('goal').value});campaign={state:result.state,save:result.save};render();$('game').scrollIntoView({behavior:'smooth',block:'start'})}catch(err){$('availability').textContent=err.message}finally{busy=false;b.disabled=false;render()}};
-$('command').onsubmit=e=>{e.preventDefault();run($('input').value)};$('potion').onclick=()=>run('I drink one of my healing potions.');$('wind').onclick=()=>run('I use Second Wind to steady myself and recover.');$('rest').onclick=()=>run('I look for a safe place and take a short rest.');$('map').onclick=()=>localCommand('/map');$('recap').onclick=()=>localCommand('/recap');$('sheet').onclick=()=>localCommand('/sheet');$('newgame').onclick=()=>{if(busy||!confirm('Begin a new campaign? This replaces your open-world save.'))return;campaign=null;retry=null;try{localStorage.removeItem(key)}catch{}render();window.scrollTo({top:0,behavior:'smooth'})};for(const id of ['rules','credits'])$(id).onclick=()=>$('modal').showModal();$('close').onclick=()=>$('modal').close();$('codexClose').onclick=()=>$('codex').close();render();
-fetch('/api/turn').then(r=>r.json()).then(d=>{ready=!!d.configured;$('availability').textContent=ready?'The dungeon master is ready.':'Open-world mode is awaiting server configuration. You can still play the original adventure below.'}).catch(()=>{$('availability').textContent='Could not reach the dungeon master. Please try again shortly.'});
+$('heroform').onsubmit=async event=>{
+  event.preventDefault();if(busy)return;busy=true;const button=event.target.querySelector('button[type="submit"]');button.disabled=true;$('availability').textContent='Preparing your campaign…';
+  try{const result=await call({start:true,name:$('name').value,cls:new FormData(event.target).get('class'),origin:$('origin').value,background:$('background').value,tone:$('tone').value,backstory:$('backstory').value,goal:$('goal').value});window.AstraExtras?.clearUndo();campaign={state:result.state,save:result.save};renderedCampaignId=null;render();$('game').scrollIntoView({behavior:'smooth',block:'start'})}
+  catch(error){$('availability').textContent=error.message}finally{busy=false;button.disabled=false;render()}
+};
+$('command').onsubmit=event=>{event.preventDefault();run($('input').value)};$('potion').onclick=()=>run('I drink one of my healing potions.');$('wind').onclick=()=>run('I use Second Wind to steady myself and recover.');$('rest').onclick=()=>run('I look for a safe place and take a short rest.');$('map').onclick=()=>localCommand('/map');$('recap').onclick=()=>localCommand('/recap');$('sheet').onclick=()=>localCommand('/sheet');
+$('newgame').onclick=()=>{if(busy||!confirm('Begin a new campaign? This replaces your open-world save.'))return;campaign=null;retry=null;renderedCampaignId=null;window.AstraExtras?.clearUndo();try{localStorage.removeItem(storageKey)}catch{}render();window.scrollTo({top:0,behavior:'smooth'})};
+for(const id of ['rules','credits'])$(id).onclick=()=>$('modal').showModal();$('close').onclick=()=>$('modal').close();$('codexClose').onclick=()=>$('codex').close();render();
+fetch('/api/turn').then(response=>response.json()).then(data=>{$('availability').textContent=data.configured?'The dungeon master is ready.':'Open-world mode is awaiting server configuration. You can still play the original adventure below.'}).catch(()=>{$('availability').textContent='Could not reach the dungeon master. Please try again shortly.'});
 setInterval(()=>{if(cooldown&&Date.now()>=cooldown){cooldown=0;if(!busy){$('turnstatus').textContent='Ready when you are. Try your action again.';render()}}},1000);
