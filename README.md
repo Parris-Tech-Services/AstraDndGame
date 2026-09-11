@@ -14,11 +14,14 @@ Deploy the repository to Vercel with framework preset **Other** and output direc
 
 ## Roadmap
 
-`docs/IMPROVEMENTS.md` is a reviewed backlog of possible improvements across game
-mechanics, the AI dungeon master, saves, front-end and accessibility, performance,
-reliability, security, code quality, testing, content, docs and licensing. Items are
-marked as confirmed defects, genuine gaps or design ideas, and the document ends with a
-suggested order of work.
+The [campaign experience review](docs/AI_IMPROVEMENT_SUMMARY.md) records the
+2026-09-11 live-play findings, current priorities, acceptance criteria and a proposed
+20-minute opening adventure. Start here for mobile usability, DM adjudication,
+combat integration, progression, campaign memory and presentation improvements.
+
+The broader [improvement backlog](docs/IMPROVEMENTS.md) covers mechanics, AI, saves,
+accessibility, reliability, testing and maintenance. It is historical and partly
+superseded: several features it originally proposed are already implemented.
 
 ## Files
 

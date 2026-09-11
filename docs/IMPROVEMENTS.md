@@ -1,5 +1,12 @@
 # Astra / The Hollow Marches — Improvement Backlog
 
+> **Current priorities (2026-09-11):** See the [campaign experience review](AI_IMPROVEMENT_SUMMARY.md)
+> for live-play observations, acceptance criteria and the next release plan. This broader
+> backlog is historical and has not been fully revalidated. Maps, tactical enemy HP/AC,
+> backup/restore, three save slots, restricted safe undo and read-aloud already exist;
+> entries describing their complete absence are superseded. Combat integration, mobile
+> usability, progression and campaign continuity remain the current focus.
+
 A review of the codebase as it stands at `c2eba07`, written as a working backlog rather
 than a wishlist. Items are grouped by domain. Each one says what exists today, what the
 change is, and how confident the reasoning is:
