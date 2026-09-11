@@ -37,6 +37,7 @@ jobs:
       - run: npm install --no-save playwright@latest
       - run: npx playwright install --with-deps chromium
       - run: node qa/browser.cjs
+      - run: node qa/mobile-story-first.cjs
       - run: node qa/crossrepo-browser.cjs
       - run: node qa/aidm-port-browser.cjs
 
