@@ -774,6 +774,67 @@ A public demo is ready when a new player can:
 - Keep the classic adventure available as a deterministic, no-provider fallback.
 - Treat prompt changes as gameplay changes and evaluate them with golden transcripts.
 
+## Custom UI direction: Astra Window Manager
+
+The next major front-end identity should be a custom fantasy campaign workspace rather than a conventional single-column webpage. The player should be able to arrange the parts of the campaign around the story they are currently telling.
+
+### Window surfaces
+
+The first shared window contract should support:
+
+```js
+{
+  id: 'character-sheet',
+  title: 'Character Sheet',
+  x: 24,
+  y: 24,
+  width: 360,
+  height: 620,
+  minWidth: 280,
+  minHeight: 220,
+  zIndex: 4,
+  minimized: false,
+  maximized: false,
+  visible: true
+}
+```
+
+Initial surfaces:
+
+- Story and Dungeon Master transcript
+- Character sheet and vitals
+- Map and discovered routes
+- Combat encounter and dice history
+- Inventory and equipment
+- Quest log
+- Journal and campaign memory
+- Codex, people, factions, and settings
+
+### Window behavior
+
+- Drag from a title bar, not from the whole panel, so text remains selectable.
+- Resize from visible edge and corner handles with minimum dimensions.
+- Bring the active window to the front and preserve a clear focus state.
+- Support minimize, maximize, restore, close, and reset layout.
+- Keep windows inside the usable viewport and offer snap-to-edge or snap-to-grid.
+- Persist positions, sizes, visibility, and z-order per campaign or browser profile.
+- Add layout presets for story-first, tactical, and journal views.
+- Keep the action input and current turn status reachable at all times.
+- Add keyboard equivalents for focus, move, resize, minimize, maximize, and reset.
+- Respect reduced motion, high contrast, zoom, and screen-reader semantics.
+- On narrow screens, replace free dragging with bottom sheets or tabs rather than shrinking panels into unusable cards.
+
+### Window manager implementation plan
+
+1. Add one reusable `WindowManager` module and a versioned layout state.
+2. Convert the current character `aside` and story `article` into managed windows.
+3. Promote map, inventory, quest, journal, codex, and encounter views into managed surfaces.
+4. Persist and restore layouts with a safe fallback when saved geometry is invalid.
+5. Add keyboard and pointer interaction tests at desktop and mobile widths.
+6. Add layout presets, visual regression snapshots, and a reset-layout control.
+
+Do not make every text fragment independently draggable. The window manager should own panel geometry; content components should remain ordinary, accessible DOM inside those panels.
+
 ## Suggested order of work
 
 Sequenced by value per unit of effort, not by section order.
@@ -806,6 +867,8 @@ Sequenced by value per unit of effort, not by section order.
 19. Golden-transcript prompt evals (2.6, 9.8).
 20. Retrieval over campaign memory (2.4).
 21. Visual map (4.2), setting canon (10.6), structured NPCs and factions (10.3, 10.4).
+22. Window manager foundation: managed story, character, and map surfaces.
+23. Layout persistence, presets, keyboard interaction, and mobile bottom-sheet mode.
 
 ---
 
