@@ -16,6 +16,12 @@ const narration=state=>({narrative:'The woman studies you, then answers with gua
   let r=await call('GET');assert.equal(r.statusCode,200);assert.equal(r.body.configured,true);assert.equal(r.body.build,'1234567890ab');assert.equal(r.body.version,3);
   r=await call('PUT');assert.equal(r.statusCode,405);assert.equal(r.headers.allow,'GET, POST');
   r=await call('POST',{start:true,name:'R',cls:'fighter'},{origin:'https://evil.test'});assert.equal(r.statusCode,403);
+
+  // Explicit origin tests
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{origin:'https://game.test'});assert.equal(r.statusCode,200,'Same-origin should be allowed');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{});assert.equal(r.statusCode,200,'Missing origin (server/curl) should be allowed');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'preview-app.vercel.app', origin:'https://preview-app.vercel.app'});assert.equal(r.statusCode,200,'Preview deployment origin matching host should be allowed');
+  r=await call('POST',{start:true,name:'R',cls:'fighter'},{host:'game.test', origin:'null'});assert.equal(r.statusCode,403,'Opaque origin (null) should be rejected');
   r=await call('POST',{start:true,name:'R',cls:'bard'});assert.equal(r.statusCode,400);
   for(const cls of ['fighter','rogue','wizard']){r=await call('POST',{start:true,name:'  Tester  ',cls});assert.equal(r.statusCode,200);assert.equal(r.body.state.cls,cls);assert.equal(r.body.state.name,'Tester');assert.equal(typeof r.body.save,'string');if(cls==='fighter')assert.equal(r.body.state.secondWindReady,true)}
   const start=await call('POST',{start:true,name:'Josh',cls:'fighter'});const save=start.body.save,state=start.body.state;
