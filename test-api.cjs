@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 process.env.GROQ_API_KEY='gsk_test_api_0000000000000000';
 process.env.DND_SESSION_SECRET='api-test-secret-api-test-secret-1234';
 process.env.VERCEL_GIT_COMMIT_SHA='1234567890abcdef';
+process.env.VERCEL='1';
 const groq=require('./server/groq.cjs');
 const handler=require('./api/turn.js');
 let ipCounter=0;
@@ -14,7 +15,7 @@ async function call(method,body,headers={}){
 const plan={kind:'none',ability:'WIS',dc:0,advantage:'normal',proficient:false,resource:'none',stakes:'Conversation.',intent:'Listen and ask a question.'};
 const narration=state=>({narrative:'The woman studies you, then answers with guarded hope.',location:state.location,time:'Dusk, moments later',suggestions:['Ask her name','Look at the shoe','Head for the abbey'],memory:state.memory+' The traveller spoke to the woman.',inventory:state.inventory,npcs:['Mara — attitude: wary — worried mother beside the Blackthorn road.'],quests:state.quests,places:state.places,exits:state.exits,factions:state.factions,facts:state.facts,journalEvents:[...state.journalEvents,'Spoke with Mara beside the road.'].slice(-18),conditionsAdded:[],conditionsRemoved:[],danger:state.danger,hpChange:0,goldChange:0,xpGain:1,rest:'none'});
 (async()=>{
-  let response=await call('GET');assert.equal(response.statusCode,200);assert.equal(response.body.configured,true);assert.equal(response.body.build,'1234567890ab');assert.equal(response.body.version,3);
+  let response=await call('GET');assert.equal(response.statusCode,200);assert.equal(response.body.configured,true);assert.equal(response.body.credentialCount,1);assert.equal(response.body.build,'1234567890ab');assert.equal(response.body.version,3);
   response=await call('PUT');assert.equal(response.statusCode,405);assert.equal(response.headers.allow,'GET, POST');
   response=await call('POST',{start:true,name:'R',cls:'fighter'},{origin:'https://evil.test'});assert.equal(response.statusCode,403);
   response=await call('POST',{start:true,name:'R',cls:'bard'});assert.equal(response.statusCode,400);

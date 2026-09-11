@@ -6,6 +6,7 @@ function reply(res,status,body){
   return res.status(status).json(body);
 }
 function sameOrigin(req){
+  // Origin is a browser CSRF signal. Non-browser clients legitimately omit it, so absence is allowed.
   const origin=req.headers.origin;if(!origin)return true;
   try{return new URL(origin).host===req.headers.host}catch{return false}
 }
@@ -20,7 +21,12 @@ function parseBody(req,maxBytes=100000){
   if(Buffer.byteLength(JSON.stringify(value),'utf8')>maxBytes)throw new Error('request_too_large');
   return value;
 }
-function clientIp(req){return String(req.headers['x-forwarded-for']||req.socket?.remoteAddress||'unknown').split(',')[0].trim()}
+function clientIp(req,{trustProxy=process.env.VERCEL==='1'}={}){
+  // Vercel owns x-forwarded-for in production. Outside a trusted proxy, prefer the socket address
+  // so a direct client cannot bypass the in-process limiter by inventing forwarded addresses.
+  const forwarded=trustProxy?req.headers['x-forwarded-for']:null;
+  return String(forwarded||req.socket?.remoteAddress||'unknown').split(',')[0].trim();
+}
 function consumeRateLimit(store,key,{limit,windowMs=60000,maxEntries=5000,now=Date.now()}={}){
   for(const [entryKey,value] of store)if(value.reset<=now)store.delete(entryKey);
   if(store.size>maxEntries)store.delete(store.keys().next().value);

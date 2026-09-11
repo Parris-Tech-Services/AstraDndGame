@@ -2,6 +2,7 @@
 const assert=require('node:assert/strict');
 process.env.DND_SESSION_SECRET='tactical-api-test-secret-1234567890';
 process.env.VERCEL_GIT_COMMIT_SHA='abcdef1234567890';
+process.env.VERCEL='1';
 const world=require('../server/world.cjs');
 const handler=require('../api/tactical.js');
 let ipCounter=0;
