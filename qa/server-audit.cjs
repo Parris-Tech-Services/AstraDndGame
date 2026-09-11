@@ -8,9 +8,19 @@ const http=require('../server/http.cjs');
 
 (async()=>{
   const stableSecret='stable-session-secret-12345678901234567890';
-  assert.equal(secret.campaignSigningSecret({GROQ_API_KEY:'gsk_unrelated_provider_key'}),null,'provider credentials must never become save-signing secrets');
-  assert.equal(secret.campaignSigningSecret({DND_SESSION_SECRET:'too-short'}),null);
-  assert.equal(secret.campaignSigningSecret({DND_SESSION_SECRET:stableSecret}),stableSecret);
+  const key1='gsk_test_first_0000000000000000',key2='gsk_test_second_000000000000000',key3='gsk_test_third_0000000000000000';
+  const legacyEnv={GROQ_API_KEY:key1};
+  const legacySecret=secret.campaignSigningSecret(legacyEnv,groq);
+  assert.equal(secret.signingMode(legacyEnv),'legacy-provider-derived');
+  assert.equal(typeof legacySecret,'string');
+  assert.equal(legacySecret.length,64);
+  const migrationEnv={...legacyEnv,DND_SESSION_SECRET:stableSecret,DND_SESSION_SECRET_PREVIOUS:JSON.stringify(['previous-stable-session-secret-123456789012345'])};
+  const migrationSecrets=secret.campaignSigningSecrets(migrationEnv,groq);
+  assert.equal(secret.signingMode(migrationEnv),'explicit');
+  assert.equal(migrationSecrets[0],stableSecret,'explicit signing secret must be primary for all new saves');
+  assert(migrationSecrets.includes(legacySecret),'legacy provider-derived secret must remain verification-only during migration');
+  const legacySave=world.sign(world.initial('Legacy save','fighter'),legacySecret);
+  assert(migrationSecrets.some(candidate=>{try{world.verify(legacySave,candidate);return true}catch{return false}}),'existing saves must survive migration to the explicit secret');
 
   let state=tactical.startEncounter(world.initial('HP invariant','fighter'),'Test foe');
   state.hp=10;
@@ -28,7 +38,6 @@ const http=require('../server/http.cjs');
 
   const schema={type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false};
   const messages=[{role:'user',content:'Return JSON.'}];
-  const key1='gsk_test_first_0000000000000000',key2='gsk_test_second_000000000000000',key3='gsk_test_third_0000000000000000';
   const env={GROQ_API_KEYS:JSON.stringify([key1,key2,key3]),GROQ_MODEL:'openai/gpt-oss-120b',GROQ_FALLBACK_MODEL:'openai/gpt-oss-20b'};
   const ok=()=>({status:200,ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'}}]})});
   const err=status=>({status,ok:false,headers:new Headers(),json:async()=>({error:{code:'upstream_test'}})});
@@ -58,5 +67,5 @@ const http=require('../server/http.cjs');
   assert.equal(http.clientIp(request,{trustProxy:false}),'127.0.0.1');
   assert.equal(http.clientIp(request,{trustProxy:true}),'198.51.100.8');
 
-  console.log('Server audit regression QA passed: stable signing secret, HP invariant, ordered credential failover, diagnostic causes and trusted-proxy IP handling.');
+  console.log('Server audit regression QA passed: migration-safe signing, HP invariant, ordered credential failover, diagnostic causes and trusted-proxy IP handling.');
 })().catch(error=>{console.error(error);process.exit(1)});
