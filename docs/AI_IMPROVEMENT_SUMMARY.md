@@ -1,171 +1,77 @@
 # Astra — Campaign Experience Review and Release Priorities
 
-Reviewed on 2026-09-11. This is the current player-facing improvement plan; all work
-below is proposed unless explicitly identified as already implemented.
+Reviewed and refreshed on 2026-09-11. This is the current player-facing improvement plan. The original live review covered character creation, a completed AI turn, desktop/mobile inspection and source review; subsequent work on the same day implemented the first two priority fixes and a repository-wide engineering hardening pass.
 
-## Evidence and scope
+## Direction
 
-The review covered character creation and one completed AI turn on the
-[live game](https://astra-dnd-game.vercel.app/), desktop and 390 × 844 mobile browser
-inspection, and source inspection of GitHub main at `220f190` and the local checkout
-at `c67ae85`. The live status endpoint reported build `c67ae8550c1c`.
-This was a focused review, not a full campaign playtest, accessibility audit or
-verification of every existing feature. One AI response illustrates a design issue;
-it does not establish how often the issue occurs.
+Make Astra feel like a continuous, consequential solo campaign. Preserve the dark green/gold presentation, opening mystery and freedom to attempt creative actions. The AI improvises fiction; deterministic/server code owns consequential game truth.
 
-## Direction and existing strengths
+## Implemented from the review
 
-Make Astra feel like a continuous, consequential solo campaign. Preserve the dark
-green and gold palette, typography, opening mystery and freedom to attempt creative
-actions. The AI should improvise fiction while the engine owns consequential rules.
+### ✅ Story-first mobile play
 
-Several recommendations in the older [improvement backlog](IMPROVEMENTS.md) and the
-previous version of this summary are outdated. The current implementation already has:
+The original review found the story and action composer far below character/inventory/tooling content on narrow screens. Mobile/tablet layouts now place the adventure article before the character sheet. Playwright regressions verify the rendered order at 390 × 844 and 800 × 900 rather than merely checking CSS text.
 
-- A visual world map and a separate tactical combat engine with enemy HP and AC.
-- Portable backup/restore and three local save slots.
-- Restricted safe undo, rather than unrestricted rewind after revealing dice outcomes.
-- Read-aloud, display preferences and ambient sound controls.
+### ✅ Ordinary conversation no longer creates arbitrary persuasion checks
 
-These features need integration and refinement, not duplicate implementations.
-Relevant sources: [page structure](../dist/index.html), [campaign tools](../dist/extras.js),
-[map and battle UI](../dist/aidm-port.js), and [tactical rules](../server/tactical.cjs).
+The original opening test turned “ask the woman about her daughter” into a CHA check. Adjudication now has an explicit policy boundary: ordinary information-seeking is converted to a no-roll action, while persuasion, deception, intimidation, coercion and other genuine influence attempts may still require checks. Unit tests and the production smoke test protect this behaviour.
 
-## 1. Put the adventure first on mobile
+### ✅ Reliability foundation strengthened
 
-**Observed:** At 390px wide, the story began roughly 2,040px below the viewport top
-and the action input was around 2,737px down in the inspected play state. Character
-statistics, inventory, quests and tools preceded the main play loop.
+The 26-principle repository audit added stricter state/model/import validation, server-authoritative spatial/reachability state, tactical request idempotency, deterministic installs/tooling, privacy-safe diagnostics and explicit signed-save boundaries. See [CODE_PRINCIPLES.md](CODE_PRINCIPLES.md) and [PRINCIPLES_AUDIT.md](PRINCIPLES_AUDIT.md).
 
-Put the story first on narrow screens, keep the action composer accessible, and move
-character details, inventory, maps and campaign tools into tabs or drawers. Preserve
-access to HP and important resource changes without requiring a long sidebar scroll.
+## Next player-facing priorities
 
-**Acceptance:** A player can read the current scene and submit the next action without
-scrolling through the character sheet. Verify with the mobile keyboard open, long
-narration, large text, and keyboard navigation; controls must not obscure the story.
+### 1. Connect tactical combat to narrative encounters
 
-## 2. Make the DM sustain momentum
+**Current state:** Tactical combat is a signed server-authoritative engine with movement, reachability, Dash, Disengage, opportunity attacks, range, cover, HP/AC and enemy turns. However, the player still starts a tactical encounter manually and names the foe.
 
-**Observed:** Choosing the opening suggestion to ask the woman about her daughter
-triggered a CHA check: 4 + 0 against DC 10. Failure made her leave without answering.
-An ordinary information-seeking question became a failed persuasion attempt.
+**Next change:** Let narrative encounters create explicit server-owned encounter state and appropriate opponents automatically. Victory, surrender, escape, injuries, rewards and NPC/quest consequences should feed back into the same campaign state and next narration.
 
-Ordinary questions should usually reveal information. Reserve rolls for persuasion,
-deception, resistance or meaningful risk. On failure, introduce a complication while
-leaving a useful clue, lead or alternative approach. Do not promise automatic success;
-make both success and failure produce something the player can act on.
+**Acceptance:** A fight arising naturally in the story can be completed without manually inventing the opponent. Character resources and outcomes agree between narration, character sheet and grid; retries cannot apply consequences twice; surrender and escape are valid outcomes.
 
-Add focused adjudication and narration evaluations covering ordinary questions,
-persuasion, investigation, creative solutions and failed checks. Treat prompt changes
-as gameplay changes and inspect narrative quality alongside deterministic rule tests.
+### 2. Give XP a purpose
 
-**Acceptance:** Asking a basic opening question does not require persuasion without a
-fictional reason. Failed checks preserve the authoritative outcome and leave a clear
-next opportunity. Check multiple model responses rather than judging one sample.
+**Current state:** XP is tracked but characters remain mechanically level 2.
 
-Sources: [adjudication](../server/adjudication.cjs), [world prompts](../server/world.cjs).
+**Next change:** Build a small complete progression arc, initially levels 2–5, with server-authoritative thresholds and class-specific benefits. Existing v3 saves must migrate safely and threshold rewards must apply exactly once.
 
-## 3. Connect tactical combat to the story
+**Acceptance:** The UI shows progress to the next unlock; crossing a threshold grants deterministic benefits once; save/backup/restore preserves them.
 
-**Confirmed in source:** The player manually starts tactical encounters and names the
-foe. The starter enemy has fixed 12 HP and 12 AC. Tactical actions use a separate API
-and the browser reloads after receiving updated state.
+### 3. Preserve a complete readable chronicle
 
-Let narrative encounters create appropriate combatants automatically. Use enemy
-archetypes and explicit encounter state; carry victory, surrender, escape, injuries,
-rewards and NPC consequences back into narration and the quest log. Both free-text
-and grid actions should operate on the same authoritative encounter and resources.
-Replace reload-driven updates with coordinated state rendering as part of integration.
+**Current state:** AI context intentionally carries only bounded recent history plus memory/facts/lists. This protects cost and context size, but the signed campaign does not yet retain a complete player-readable chronicle indefinitely.
 
-**Acceptance:** A fight arising from the story can be completed without manually
-inventing the opponent. Damage, resources and outcomes agree between the character
-sheet, tactical view and next narration. Retries or competing UI actions cannot apply
-the same consequence twice. Include surrender and escape paths, not only killing.
+**Next change:** Store the complete readable chronicle separately from bounded model context. Keep NPCs, promises and quests structured with stable identities/status. Start with deterministic lookup; only add embeddings if measured retrieval quality requires them.
 
-Sources: [tactical rules](../server/tactical.cjs), [tactical API](../api/tactical.js),
-[turn API](../api/turn.js), [battle UI](../dist/aidm-port.js).
+**Acceptance:** Earlier scenes remain readable after long play. A named NPC, promise and resolved quest survive a long campaign plus export/restore without bloating every model request.
 
-## 4. Give XP a purpose
+### 4. Make turn delivery smoother and more accessible
 
-**Confirmed in source:** Characters start and remain mechanically level 2; XP tracks
-narrative progress without automatic levelling.
+**Current state:** The browser now appends new transcript entries rather than rebuilding the ARIA live log and preserves scroll position while someone reads older text. Server turns are still returned as complete responses rather than streamed narration.
 
-Build a small, complete progression arc, initially perhaps levels 2–5. Add meaningful
-class choices, appropriate HP and resource growth, spells and equipment upgrades.
-Show the next threshold and what it unlocks. Keep progression server-authoritative,
-and support existing saves when extending their schema.
+**Next change:** If streaming is introduced, treat displayed partial narration as provisional and commit authoritative state only after the complete structured result validates.
 
-**Acceptance:** A completed adventure awards progress toward a visible unlock; crossing
-a threshold grants the selected benefits exactly once and survives save/restore.
-Different classes receive distinct, usable improvements.
+**Acceptance:** Interrupted/invalid turns preserve the previous save; screen readers do not re-announce old transcript content; reading older text is not forcibly interrupted; any partial text is clearly non-authoritative until commit.
 
-Source: [world state and progression](../server/world.cjs).
+## One excellent 20-minute opening adventure
 
-## 5. Preserve the player's story
-
-**Confirmed in source:** Saved history retains six turns. AI context uses only recent
-history and bounded summaries, facts and lists; there is no complete chronicle in that
-state. This is a retention limitation, not proof of a measured long-campaign failure.
-
-Store a complete readable chronicle separately from bounded AI context and include it
-in backup/export. Give NPCs, quests and promises structured records with stable
-identities, status and relevant relationships. Retrieve relevant established facts for
-future turns; start with structured lookup and evaluate whether embeddings are needed.
-
-**Acceptance:** Earlier scenes remain readable after more than six turns. A named NPC,
-unresolved promise and completed quest remain available after a longer campaign and
-backup/restore. Keep active, completed and failed quests distinguishable.
-
-Sources: [world history and context](../server/world.cjs), [backup format](../dist/extras.js).
-
-## 6. Make turns smoother to read
-
-**Confirmed in source:** The turn API returns the completed result rather than streamed
-narration. The client replaces the entire story log on render and scrolls it to the
-bottom. In an ARIA live log this risks repeated announcements; screen-reader behaviour
-was not directly tested in this review.
-
-Stream narration for display while committing authoritative state only after the full
-response passes validation. Show actual turn stages where available. Append new
-transcript entries instead of rebuilding the log, and preserve scroll position when
-someone is reading earlier text. Offer a new-content indicator when not at the bottom.
-
-**Acceptance:** New text appears progressively; interrupted or invalid turns preserve
-the previous save and support retry. Partial narration is clearly provisional if a
-turn fails. Screen readers announce new content without repeating earlier entries,
-and reading older text is not interrupted by forced scrolling.
-
-Sources: [turn API](../api/turn.js), [story rendering](../dist/world.js).
-
-## Atmosphere and presentation
-
-After the core play loop improvements, add a restrained illustrated opening, location
-artwork, and clear feedback for damage, discoveries and quest completion. Retain the
-existing typography and palette. Keep artwork responsive and lightweight, make motion
-respect reduced-motion preferences, and communicate outcomes in text as well as visuals.
-
-## Next release: one excellent 20-minute adventure
-
-Build and playtest a complete opening arc in which the player can:
+Use the opening arc as the integration test for future product work. A player should be able to:
 
 1. Meet the woman and obtain a clue through several plausible approaches.
-2. Travel somewhere memorable and see the location reflected in the map and story.
-3. Resolve a real encounter through combat, negotiation or escape.
-4. Earn a meaningful reward and see progress toward a character unlock.
-5. Return to discover that their choices changed an NPC, quest or location.
+2. Travel somewhere memorable and see the location reflected in the signed map and story.
+3. Resolve a meaningful encounter through combat, negotiation or escape.
+4. Earn a meaningful reward and progress toward an unlock.
+5. Return to discover that choices changed an NPC, quest or location.
 6. Save, restore and resume with those consequences intact.
 
-Target roughly 20 minutes without forcing a fixed route or preventing open-world play.
-Use this arc to verify that the existing features work together before adding breadth.
+This should remain open-world rather than a forced route. New breadth should wait until these existing systems work together cleanly.
 
 ## Order of work
 
-1. Mobile story-first layout, conversation adjudication and combat integration.
-2. Character progression, durable chronicle and structured campaign memory.
-3. Smoother turn delivery and accessible incremental rendering; fix transcript
-   accessibility early if confirmed during testing rather than waiting for streaming.
-4. Atmospheric artwork and visual feedback, followed by broader content expansion.
+1. Narrative ↔ tactical encounter integration.
+2. Levels 2–5 progression and durable chronicle/structured campaign memory.
+3. Accessible progressive turn delivery only if it preserves atomic state commits.
+4. Restrained atmospheric art and outcome feedback, then broader content expansion.
 
-Evaluate each change against the opening arc and maintain clear distinctions between
-implemented features, code-confirmed limitations, playtest observations and proposals.
+The historical [IMPROVEMENTS.md](IMPROVEMENTS.md) remains useful research context, but this document is the current product priority source of truth.
