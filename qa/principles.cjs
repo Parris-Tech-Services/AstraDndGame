@@ -16,6 +16,8 @@ const serviceWorker = read('dist/sw.js');
 const extras = read('dist/extras.js');
 const turnApi = read('api/turn.js');
 const tacticalApi = read('api/tactical.js');
+const secretPolicy = read('server/secret.cjs');
+const provider = read('server/groq.cjs');
 const principles = read('docs/CODE_PRINCIPLES.md');
 const audit = read('docs/PRINCIPLES_AUDIT.md');
 
@@ -29,6 +31,7 @@ assert.match(workflow, /npm ci/);
 assert(!workflow.includes('@latest'), 'CI must not install floating latest tooling');
 assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
 assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+assert.match(workflow, /'fix\/\*\*'/);
 assert.match(workflow, /'audit\/\*\*'/);
 
 assert.equal(vercel.installCommand, 'npm ci');
@@ -53,6 +56,9 @@ assert(!/window\.fetch\s*=/.test(extras), 'campaign tools must not intercept glo
 assert(turnApi.includes('validRequestId'));
 assert(tacticalApi.includes('validRequestId'));
 assert(!turnApi.includes('providerMessage'), 'provider diagnostics must not log provider text');
+assert(!/require\(['"]\.\/groq/.test(secretPolicy), 'campaign signing must not depend on provider credentials');
+assert(!secretPolicy.includes('GROQ_API_KEY'), 'campaign signing must not derive from Groq keys');
+assert(provider.includes('createProviderState'), 'provider health state must be explicit and testable');
 
 for (const folder of ['api', 'server']) {
   for (const file of fs.readdirSync(path.join(root, folder)).filter(name => /\.(?:js|cjs)$/.test(name))) {
@@ -96,7 +102,8 @@ assert.match(audit, /Scope and honesty note/);
 
 assert.match(index, /role="log" aria-live="polite"/);
 assert.match(read('dist/style.css'), /prefers-reduced-motion/);
+assert(packageJson.scripts.test.includes('qa/server-audit.cjs'));
 assert(packageJson.scripts.test.includes('qa/tactical-api.cjs'));
 assert(packageJson.scripts.test.includes('qa/principles.cjs'));
 
-console.log('Principles QA passed: reproducible builds, security boundaries, source-of-truth checks, accessibility gates and all 26 engineering principles are present.');
+console.log('Principles QA passed: reproducible builds, security boundaries, source-of-truth checks, stable signing policy, accessibility gates and all 26 engineering principles are present.');
