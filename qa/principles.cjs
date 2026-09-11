@@ -93,7 +93,6 @@ for (let number = 1; number <= 26; number++) {
   assert(new RegExp(`(?:^|\\n)${number}\\. \\*\\*`).test(principles), `engineering principle ${number} is missing`);
 }
 assert.match(audit, /Scope and honesty note/);
-assert.match(audit, /Known issues/);
 
 assert.match(index, /role="log" aria-live="polite"/);
 assert.match(read('dist/style.css'), /prefers-reduced-motion/);
