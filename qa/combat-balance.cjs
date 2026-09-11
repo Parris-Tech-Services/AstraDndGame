@@ -21,7 +21,7 @@ function winRate(level,style,trials=300){let wins=0;for(let i=0;i<trials;i++)if(
 
 for(const level of [2,5])for(const style of ['bruiser','skirmisher']){
   const rate=winRate(level,style);console.log(`Fighter level ${level} vs ${style}: ${(rate*100).toFixed(1)}% wins`);
-  assert(rate<.98,`fighter level ${level} must not have a near-certain win against ${style}`);
+  assert(rate<.90,`fighter level ${level} must retain meaningful loss risk against ${style}`);
   assert(rate>.20,`fighter level ${level} should still have a plausible solo chance against ${style}`);
 }
-console.log('Combat balance simulation passed: 1,200 seeded fights retain real win/loss uncertainty at levels 2 and 5.');
+console.log('Combat balance simulation passed: 1,200 seeded fights stay between 20% and 90% Fighter win rate at levels 2 and 5.');
