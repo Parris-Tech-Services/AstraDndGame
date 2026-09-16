@@ -57,3 +57,11 @@ const api={validState,validCampaign,parseCampaign};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;
 root.AstraValidation=api;
 })(typeof window!=='undefined'?window:globalThis);
+
+if(typeof document!=='undefined'&&!document.getElementById('astra-podcast-script')){
+  const script=document.createElement('script');
+  script.id='astra-podcast-script';
+  script.src='./podcast-player.js';
+  script.defer=true;
+  document.head.appendChild(script);
+}
