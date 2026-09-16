@@ -28,16 +28,24 @@
   ];
 
   const STORAGE_KEY = 'astra-podcast-v1';
+  const VISIBILITY_KEY = 'astra-podcast-visible-v1';
   let open = false;
+  let visible = true;
   let currentIndex = 0;
 
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     if (Number.isInteger(saved.current) && saved.current >= 0 && saved.current < episodes.length) currentIndex = saved.current;
+    const savedVisibility = localStorage.getItem(VISIBILITY_KEY);
+    if (savedVisibility !== null) visible = savedVisibility !== 'false';
   } catch (_) {}
 
   const save = () => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ current: currentIndex })); } catch (_) {}
+  };
+
+  const saveVisibility = () => {
+    try { localStorage.setItem(VISIBILITY_KEY, String(visible)); } catch (_) {}
   };
 
   const pickDifferent = () => {
@@ -52,7 +60,7 @@
     #astra-podcast-root{position:relative;z-index:2147483000;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     #astra-podcast-launcher{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2147483000;border:1px solid rgba(226,197,114,.35);border-radius:999px;background:#111715;color:#f4ead0;padding:12px 18px;font:700 14px/1.2 system-ui,sans-serif;box-shadow:0 12px 35px rgba(0,0,0,.5);cursor:pointer;white-space:nowrap;touch-action:manipulation;pointer-events:auto}
     #astra-podcast-panel{position:fixed;left:50%;bottom:max(8px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2147483000;width:min(620px,calc(100vw - 16px));box-sizing:border-box;border:1px solid #665b42;border-radius:18px;background:#101512;color:#f7efd8;padding:13px;box-shadow:0 18px 50px rgba(0,0,0,.65);pointer-events:auto}
-    .astra-podcast-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.astra-podcast-kicker{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#d9bc70}.astra-podcast-title{font-size:16px;line-height:1.3;margin:4px 0 0;color:#fff7df}.astra-podcast-meta{font-size:12px;line-height:1.4;color:#cfc6ae;margin:5px 0 0}.astra-podcast-close{width:40px;height:40px;flex:0 0 40px;border:1px solid #5d5545;border-radius:50%;background:#25281f;color:#fff7df;font-size:22px;cursor:pointer;touch-action:manipulation}.astra-podcast-frame{display:block;width:100%;height:152px;border:0;border-radius:12px;background:#050705}.astra-podcast-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.astra-podcast-button,.astra-podcast-link{border-radius:10px;padding:9px 12px;font:700 13px/1.2 system-ui,sans-serif;text-decoration:none;cursor:pointer;touch-action:manipulation}.astra-podcast-button{border:0;background:#795f24;color:#fff}.astra-podcast-link{display:inline-flex;align-items:center;border:1px solid #5d5545;background:#25281f;color:#fff7df}.astra-podcast-note{font-size:11px;color:#a9a28f;margin:9px 0 0}
+    .astra-podcast-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.astra-podcast-kicker{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#d9bc70}.astra-podcast-title{font-size:16px;line-height:1.3;margin:4px 0 0;color:#fff7df}.astra-podcast-meta{font-size:12px;line-height:1.4;color:#cfc6ae;margin:5px 0 0}.astra-podcast-close{width:40px;height:40px;flex:0 0 40px;border:1px solid #5d5545;border-radius:50%;background:#25281f;color:#fff7df;font-size:22px;cursor:pointer;touch-action:manipulation}.astra-podcast-frame{display:block;width:100%;height:152px;border:0;border-radius:12px;background:#050705}.astra-podcast-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.astra-podcast-button,.astra-podcast-link,.astra-podcast-hide{border-radius:10px;padding:9px 12px;font:700 13px/1.2 system-ui,sans-serif;text-decoration:none;cursor:pointer;touch-action:manipulation}.astra-podcast-button{border:0;background:#795f24;color:#fff}.astra-podcast-link{display:inline-flex;align-items:center;border:1px solid #5d5545;background:#25281f;color:#fff7df}.astra-podcast-hide{border:1px solid #5d5545;background:transparent;color:#cfc6ae}.astra-podcast-note{font-size:11px;color:#a9a28f;margin:9px 0 0}
     @media(max-width:640px){#astra-podcast-panel{width:calc(100vw - 10px);padding:11px}.astra-podcast-actions>*{flex:1;justify-content:center;text-align:center}}
   `;
   document.head.appendChild(style);
@@ -61,7 +69,50 @@
   root.id = 'astra-podcast-root';
   document.body.appendChild(root);
 
+  function syncSettingsToggle() {
+    const checkbox = document.getElementById('prefPodcasts');
+    if (checkbox) checkbox.checked = visible;
+  }
+
+  function setVisible(next, persist = true) {
+    visible = !!next;
+    if (!visible) {
+      open = false;
+      root.replaceChildren();
+      root.hidden = true;
+    } else {
+      root.hidden = false;
+      render();
+    }
+    if (persist) saveVisibility();
+    syncSettingsToggle();
+  }
+
+  function installSettingsToggle() {
+    const settings = document.getElementById('astraSettings');
+    if (!settings || document.getElementById('prefPodcasts')) return false;
+    const label = document.createElement('label');
+    label.className = 'setting-row';
+    label.innerHTML = '<input id="prefPodcasts" type="checkbox"> Show podcast button';
+    const fullscreen = settings.querySelector('#fullscreen');
+    if (fullscreen) fullscreen.before(label); else settings.append(label);
+    const checkbox = label.querySelector('input');
+    checkbox.checked = visible;
+    checkbox.addEventListener('change', event => setVisible(event.target.checked));
+    return true;
+  }
+
+  function ensureSettingsToggle() {
+    if (!installSettingsToggle()) setTimeout(ensureSettingsToggle, 350);
+  }
+
   function render() {
+    if (!visible) {
+      root.hidden = true;
+      root.replaceChildren();
+      return;
+    }
+    root.hidden = false;
     if (!open) {
       root.innerHTML = '<button id="astra-podcast-launcher" type="button" aria-label="Open D&D podcasts">🎧 Podcasts</button>';
       root.querySelector('#astra-podcast-launcher').addEventListener('click', () => { open = true; render(); });
@@ -73,8 +124,8 @@
       <aside id="astra-podcast-panel" aria-label="Astra D&D podcast player">
         <div class="astra-podcast-head"><div><div class="astra-podcast-kicker">Astra Adventures · D&D / GM podcast</div><h2 class="astra-podcast-title"></h2><p class="astra-podcast-meta"></p></div><button type="button" class="astra-podcast-close" aria-label="Close podcast player">×</button></div>
         <iframe class="astra-podcast-frame" title="Spotify podcast episode" loading="lazy" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
-        <div class="astra-podcast-actions"><button type="button" class="astra-podcast-button">🎲 Different podcast</button><a class="astra-podcast-link" target="_blank" rel="noopener noreferrer">Open in Spotify ↗</a></div>
-        <p class="astra-podcast-note">25-episode D&D, DMing, RPG-design and worldbuilding bank stored inside Astra. The player closes automatically if Astra read-aloud or page audio starts.</p>
+        <div class="astra-podcast-actions"><button type="button" class="astra-podcast-button">🎲 Different podcast</button><a class="astra-podcast-link" target="_blank" rel="noopener noreferrer">Open in Spotify ↗</a><button type="button" class="astra-podcast-hide">Hide podcasts</button></div>
+        <p class="astra-podcast-note">25-episode D&D, DMing, RPG-design and worldbuilding bank stored inside Astra. Hide/show the launcher any time from Display settings.</p>
       </aside>`;
 
     root.querySelector('.astra-podcast-title').textContent = current.title;
@@ -85,6 +136,7 @@
     root.querySelector('.astra-podcast-link').href = `https://open.spotify.com/episode/${encodeURIComponent(current.id)}`;
     root.querySelector('.astra-podcast-close').addEventListener('click', () => { open = false; render(); });
     root.querySelector('.astra-podcast-button').addEventListener('click', () => { currentIndex = pickDifferent(); save(); render(); });
+    root.querySelector('.astra-podcast-hide').addEventListener('click', () => setVisible(false));
   }
 
   function yieldToGameAudio() {
@@ -98,5 +150,7 @@
     if (open && window.speechSynthesis && window.speechSynthesis.speaking) yieldToGameAudio();
   }, 400);
 
-  render();
+  window.AstraPodcast = { setVisible, isVisible: () => visible };
+  ensureSettingsToggle();
+  setVisible(visible, false);
 })();
