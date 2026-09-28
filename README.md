@@ -1,3 +1,7 @@
+Engineering principles: v5.1
+Assurance tier: 2 + LLM/agent overlay
+Canonical repository: https://github.com/Parris-Tech-Services/AstraDndGame
+
 # The Bell Beneath Blackthorn
 
 An original solo fantasy text adventure inspired by fifth-edition tabletop play. Built for Josh.
