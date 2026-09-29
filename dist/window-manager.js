@@ -273,7 +273,10 @@
       const hp = document.querySelector('#hp')?.textContent || '—';
       const ac = document.querySelector('#ac')?.textContent || '—';
       const pack = document.querySelector('#pack')?.textContent || '';
-      strip.textContent = `HP ${hp}  ·  AC ${ac}  ·  ${pack.split('\n')[0] || 'Resources ready'}`;
+      const text = `HP ${hp}  ·  AC ${ac}  ·  ${pack.split('\n')[0] || 'Resources ready'}`;
+      // The strip lives inside the observed #game subtree, so an unconditional
+      // write re-fires this observer forever and freezes the page.
+      if (strip.textContent !== text) strip.textContent = text;
     };
     story.querySelector('.window-titlebar')?.after(strip);
     update();
