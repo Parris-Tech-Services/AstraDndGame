@@ -49,4 +49,33 @@ assert.match(css, /@media \(max-width:760px\)/, 'mobile layout mode exists');
 assert.match(css, /window-panel\[data-window-id="story"\].*order:-3/, 'mobile layout promotes story first');
 assert.match(css, /window-resize\{display:none\}/, 'mobile layout disables floating resize handles');
 
-console.log('Window manager QA passed: three managed panels, versioned persistence, controls, focus, recovery, and mobile story-first rules.');
+(async () => {
+  // The quick-stats strip sits inside the observed #game subtree, so writing it
+  // unconditionally re-fires its own MutationObserver forever and freezes the page.
+  const looped = createDom();
+  const { document } = looped.window;
+  const strip = document.querySelector('#mobile-quick-stats');
+  assert(strip, 'mobile quick-stats strip is mounted');
+  const textContent = Object.getOwnPropertyDescriptor(looped.window.Node.prototype, 'textContent');
+  let writes = 0;
+  Object.defineProperty(strip, 'textContent', {
+    get() { return textContent.get.call(this); },
+    set(value) {
+      if (++writes > 20) throw new Error('quick-stats observer loop');
+      textContent.set.call(this, value);
+    }
+  });
+  const hp = document.createElement('span');
+  hp.id = 'hp';
+  hp.textContent = '12';
+  document.querySelector('aside').append(hp);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert(writes <= 2, `quick-stats settles after a change instead of looping (${writes} writes)`);
+  assert.match(strip.textContent, /HP 12/, 'quick-stats reflects the new HP');
+  looped.window.close();
+
+  console.log('Window manager QA passed: three managed panels, versioned persistence, controls, focus, recovery, mobile story-first rules, and no quick-stats observer loop.');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
