@@ -6,6 +6,7 @@ on:
       - 'server/groq.cjs'
       - 'qa/server-audit.cjs'
       - 'test-world.cjs'
+      - 'qa/principles.cjs'
       - '.github/workflows/groq-regression.yml'
   workflow_dispatch:
 permissions:
