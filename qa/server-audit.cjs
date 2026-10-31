@@ -51,6 +51,50 @@ const http=require('../server/http.cjs');
   assert.deepEqual(await groq.generate(messages,schema,{env,fetcher:failover,providerState:groq.createProviderState()}),{ok:true});
   assert.deepEqual(seen,[key1,key1,key2,key2,key3],'availability failures must exhaust configured credentials in order');
 
+  // Keep story quality high while using the lightweight model for rules planning.
+  const plannerSeen=[];
+  const planState=groq.createProviderState();
+  const plannerFetcher=async(_url,options)=>{
+    plannerSeen.push(JSON.parse(options.body).model);
+    return ok();
+  };
+  await groq.generate(messages,schema,{env,fetcher:plannerFetcher,stage:'plan',providerState:planState});
+  assert.deepEqual(plannerSeen,['openai/gpt-oss-20b'],'planning should start on 20B to preserve the narration quota');
+
+  // Model-specific 429 can fall back to 20B; never rotate to the next key.
+  const fallbackState=groq.createProviderState();
+  const fallbackSeen=[];
+  const fallbackFetcher=async(_url,options)=>{
+    const model=JSON.parse(options.body).model;
+    fallbackSeen.push({model,key:options.headers.Authorization.slice('Bearer '.length)});
+    if(model==='openai/gpt-oss-120b')
+      return {status:429,ok:false,headers:new Headers({'retry-after':'8'}),json:async()=>({error:{code:'rate_limit'}})};
+    return ok();
+  };
+  assert.deepEqual(await groq.generate(messages,schema,{env,fetcher:fallbackFetcher,stage:'narrate',providerState:fallbackState}),{ok:true});
+  assert.deepEqual(fallbackSeen.map(x=>x.model),['openai/gpt-oss-120b','openai/gpt-oss-20b']);
+  assert(fallbackSeen.every(x=>x.key===key1),'429 must not trigger a switch to another API credential');
+  fallbackSeen.length=0;
+  await groq.generate(messages,schema,{env,fetcher:fallbackFetcher,stage:'narrate',providerState:fallbackState});
+  assert.deepEqual(fallbackSeen.map(x=>x.model),['openai/gpt-oss-20b'],'known rate-limited model must cool down');
+
+  // If the whole model pool is limited, the action fails closed and honours Retry-After.
+  const exhaustedSeen=[];
+  const exhaustedState=groq.createProviderState();
+  const allLimited=async(_url,options)=>{
+    exhaustedSeen.push({model:JSON.parse(options.body).model,key:options.headers.Authorization.slice('Bearer '.length)});
+    return {status:429,ok:false,headers:new Headers({'retry-after':'6'}),json:async()=>({error:{code:'rate_limit'}})};
+  };
+  await assert.rejects(
+    groq.generate(messages,schema,{env,fetcher:allLimited,stage:'narrate',providerState:exhaustedState}),
+    error=>error.status===429&&error.retryAfter===6
+  );
+  assert.equal(exhaustedSeen.length,2,'only the two distinct models should be attempted');
+  assert(exhaustedSeen.every(x=>x.key===key1),'even two 429 responses must not hop keys');
+  await assert.rejects(groq.generate(messages,schema,{env,fetcher:allLimited,stage:'narrate',providerState:exhaustedState}),
+    error=>error.status===429&&error.retryAfter>0);
+  assert.equal(exhaustedSeen.length,2,'shared cooldown must suppress further provider calls');
+
   const timeoutEnv={GROQ_API_KEY:key1,GROQ_MODEL:'openai/gpt-oss-120b',GROQ_FALLBACK_MODEL:'openai/gpt-oss-120b'};
   await assert.rejects(
     groq.generate(messages,schema,{env:timeoutEnv,fetcher:async()=>{const error=new Error('timed out');error.name='TimeoutError';throw error},providerState:groq.createProviderState()}),
