@@ -31,8 +31,12 @@ assert.match(workflow, /npm ci/);
 assert(!workflow.includes('@latest'), 'CI must not install floating latest tooling');
 assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
 assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
-assert.match(workflow, /'fix\/\*\*'/);
-assert.match(workflow, /'audit\/\*\*'/);
+// Provider changes must be automatically checked even though the full browser gate is manual.
+const groqWorkflow = read('.github/workflows/groq-regression.yml');
+assert(groqWorkflow.includes("'server/groq.cjs'"), 'Groq source edits must trigger CI');
+assert(groqWorkflow.includes("'qa/server-audit.cjs'"), 'Groq test edits must trigger CI');
+assert(groqWorkflow.includes('npm test'), 'Groq checks must execute full game tests');
+assert(groqWorkflow.includes('npm run build'), 'Groq checks must validate the deployment build');
 
 assert.equal(vercel.installCommand, 'npm ci');
 assert.equal(vercel.buildCommand, 'npm run build', 'Vercel preview builds should run deterministic build sanity, not duplicate the full QA suite');
