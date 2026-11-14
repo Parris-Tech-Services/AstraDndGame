@@ -1,6 +1,6 @@
 'use strict';
 const DISABLED_TTL_MS=5*60*1000;
-function createProviderState(){return {cooldownUntil:0,disabledUntil:new Map()}}
+function createProviderState(){return {cooldownUntil:0,disabledUntil:new Map(),modelCooldownUntil:new Map()}}
 const defaultProviderState=createProviderState();
 
 class ProviderError extends Error{
@@ -41,6 +41,7 @@ function clean(value,max=320){
 
 function pruneDisabled(state,now){
   for(const [key,until] of state.disabledUntil)if(until<=now)state.disabledUntil.delete(key);
+  for(const [model,until] of state.modelCooldownUntil)if(until<=now)state.modelCooldownUntil.delete(model);
 }
 
 async function providerDetails(response,model,stage){
@@ -122,9 +123,10 @@ async function parseOrRemember(response,model,stage){
 
 function recordRateLimit(state,response,model,stage,now){
   const seconds=retrySeconds(response.headers?.get?.('retry-after'),now());
-  // Groq rate limits have an organisation ceiling, so changing credentials does not bypass a 429.
-  state.cooldownUntil=now()+seconds*1000;
-  throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,seconds,{providerStatus:429,providerCode:'rate_limit',causeCode:'rate_limit',model,stage});
+  // Each model may have its own limit within a shared organisation ceiling.
+  // Respect the offending model's Retry-After, without hopping API keys.
+  state.modelCooldownUntil.set(model,Math.max(state.modelCooldownUntil.get(model)||0,now()+seconds*1000));
+  return new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,seconds,{providerStatus:429,providerCode:'rate_limit',causeCode:'rate_limit',model,stage});
 }
 
 async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.now,stage='turn',providerState=defaultProviderState}={}){
@@ -133,23 +135,31 @@ async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.
   const current=now();pruneDisabled(providerState,current);
   if(providerState.cooldownUntil>current)throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,Math.max(1,Math.ceil((providerState.cooldownUntil-current)/1000)),{providerStatus:429,providerCode:'rate_limit',causeCode:'rate_limit',stage});
 
-  const models=[...new Set([env.GROQ_MODEL||'openai/gpt-oss-120b',env.GROQ_FALLBACK_MODEL||'openai/gpt-oss-20b'].filter(Boolean))];
+  const primary=env.GROQ_MODEL||'openai/gpt-oss-120b';
+  const fallback=env.GROQ_FALLBACK_MODEL||'openai/gpt-oss-20b';
+  // The plan is compact JSON; reserve the stronger 120B model for narration.
+  const models=[...new Set((stage==='plan'?[env.GROQ_PLAN_MODEL||fallback,primary]:[primary,fallback]).filter(Boolean))];
+  if(models.every(model=>(providerState.modelCooldownUntil.get(model)||0)>current)){
+    const retryAfter=Math.max(1,Math.ceil((Math.min(...models.map(model=>providerState.modelCooldownUntil.get(model)))-current)/1000));
+    throw new ProviderError('Groq is rate-limited right now. Your action has not been applied.',429,retryAfter,{providerStatus:429,providerCode:'rate_limit',causeCode:'rate_limit',stage});
+  }
   const deadline=now()+35000;
-  let lastFailure=null;
+  let lastFailure=null,lastRateLimit=null;
 
-  // Credentials are tried in configured order for availability failover. A provider 429 is
-  // organisation-scoped and is respected rather than bypassed by hopping credentials.
+  // Credentials are tried in configured order only for availability failures.
+  // A 429 may be model-scoped; use another model on the SAME key, never another key.
   for(const key of pool){
     if((providerState.disabledUntil.get(key)||0)>now())continue;
     let tryNextCredential=false;
     let stopAfterCredential=false;
 
     for(const model of models){
+      if((providerState.modelCooldownUntil.get(model)||0)>now())continue;
       const attempt=await request(key,model,messages,schema,{fetcher,now,deadline,stage,strict:true});
       if(!attempt.response){lastFailure=attempt.failure;tryNextCredential=true;continue}
       let response=attempt.response;
 
-      if(response.status===429)recordRateLimit(providerState,response,model,stage,now);
+      if(response.status===429){lastRateLimit=recordRateLimit(providerState,response,model,stage,now);continue}
       if(response.status===401){
         providerState.disabledUntil.set(key,now()+DISABLED_TTL_MS);
         lastFailure=await providerDetails(response,model,stage);
@@ -172,7 +182,7 @@ async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.
         const compatibilityAttempt=await request(key,model,messages,schema,{fetcher,now,deadline,stage,strict:false});
         if(!compatibilityAttempt.response){lastFailure=compatibilityAttempt.failure;tryNextCredential=true;continue}
         response=compatibilityAttempt.response;
-        if(response.status===429)recordRateLimit(providerState,response,model,stage,now);
+        if(response.status===429){lastRateLimit=recordRateLimit(providerState,response,model,stage,now);continue}
         if(response.status===401){
           providerState.disabledUntil.set(key,now()+DISABLED_TTL_MS);
           lastFailure=await providerDetails(response,model,stage);
@@ -193,6 +203,13 @@ async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.
       throw publicFailure(details);
     }
 
+    if(lastRateLimit){
+      // When both model buckets are cooling down, prevent repeated attempts
+      // within this warm serverless instance until the earliest retry time.
+      if(models.every(model=>(providerState.modelCooldownUntil.get(model)||0)>now()))
+        providerState.cooldownUntil=Math.min(...models.map(model=>providerState.modelCooldownUntil.get(model)));
+      throw lastRateLimit;
+    }
     if(stopAfterCredential&&!tryNextCredential)break;
   }
 
@@ -200,5 +217,5 @@ async function generate(messages,schema,{env=process.env,fetcher=fetch,now=Date.
   throw new ProviderError('No valid dungeon-master credential is available. Your save is unchanged.',503);
 }
 
-function resetForTests(){defaultProviderState.cooldownUntil=0;defaultProviderState.disabledUntil.clear()}
+function resetForTests(){defaultProviderState.cooldownUntil=0;defaultProviderState.disabledUntil.clear();defaultProviderState.modelCooldownUntil.clear()}
 module.exports={generate,keys,ProviderError,createProviderState,resetForTests};

@@ -1,0 +1,36 @@
+name: Build CDN Website
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'web-dist/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Make self-contained classic game the CDN entry point
+        run: cp dist/classic.html dist/index.html
+      - name: Publish compiled website into repository
+        run: |
+          rm -rf web-dist
+          mkdir web-dist
+          cp -R dist/. web-dist/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A web-dist
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update compiled CDN website [skip ci]"
+          git push

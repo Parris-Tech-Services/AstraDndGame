@@ -14,10 +14,11 @@ const providerEnv={GROQ_API_KEYS:JSON.stringify(['gsk_test_primary_0000000000','
 const ok=()=>({status:200,ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'}}]})});
 const err=(status,body={},headers={})=>({status,ok:false,headers:new Headers(headers),json:async()=>body});
 
-// A provider 429 pauses the whole credential pool. Backups are for availability, not quota multiplication.
+// Each model has a rate-limit bucket; after both respond 429, pause the pool.
+// API-key backups are for availability, not quota multiplication.
 P.resetForTests();let requests=0;const limited=async()=>{requests++;return err(429,{error:{code:'rate_limit_exceeded'}},{'retry-after':'3'})};
-await assert.rejects(P.generate(messages,schema,{env:providerEnv,fetcher:limited}),e=>e.status===429&&e.retryAfter===3);assert.equal(requests,1);
-await assert.rejects(P.generate(messages,schema,{env:providerEnv,fetcher:limited}),e=>e.status===429);assert.equal(requests,1);
+await assert.rejects(P.generate(messages,schema,{env:providerEnv,fetcher:limited}),e=>e.status===429&&e.retryAfter===3);assert.equal(requests,2);
+await assert.rejects(P.generate(messages,schema,{env:providerEnv,fetcher:limited}),e=>e.status===429);assert.equal(requests,2);
 
 // Bad credentials fail over to a backup.
 P.resetForTests();requests=0;const auth=async()=>{requests++;return requests===1?err(401,{error:{code:'invalid_api_key',message:'bad key'}}):ok()};
