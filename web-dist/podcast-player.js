@@ -30,7 +30,8 @@
   const STORAGE_KEY = 'astra-podcast-v1';
   const VISIBILITY_KEY = 'astra-podcast-visible-v1';
   let open = false;
-  let visible = true;
+  // Off by default: podcasts should not distract from play unless turned on in Settings.
+  let visible = false;
   let currentIndex = 0;
 
   try {
